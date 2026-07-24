@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="What does the Rebbe say? Ask any question and get a careful, source-backed answer drawn only from the Lubavitcher Rebbe’s own letters, talks, and teachings — every claim linked to its original source.">
+  <meta name="keywords" content="Lubavitcher Rebbe, Menachem Mendel Schneerson, Chabad, Torah, Jewish wisdom, Igros Kodesh, source-backed answers">
+  <meta name="robots" content="index, follow">
+  <meta name="theme-color" content="#141210">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="The Rebbe / Index">
+  <meta property="og:title" content="What does the Rebbe say? — Source-backed answers from the Rebbe’s own words">
+  <meta property="og:description" content="Ask a question and explore a careful synthesis drawn only from the Lubavitcher Rebbe’s letters, talks, and teachings — every claim traceable to its original source.">
+  <meta property="og:url" content="https://therebbesays.com/">
+  <meta property="og:image" content="https://therebbesays.com/images/rebbe-portrait-close.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="What does the Rebbe say? — The Rebbe / Index">
+  <meta name="twitter:description" content="Source-backed answers from the published teachings and correspondence of the Lubavitcher Rebbe.">
+  <meta name="twitter:image" content="https://therebbesays.com/images/rebbe-portrait-close.png">
+  <link rel="canonical" href="https://therebbesays.com/">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+  <title>What does the Rebbe say?</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style id="phase2-styles">
+    .header-actions { display:flex; align-items:center; gap:10px; }
+    .auth-slot { display:flex; align-items:center; gap:8px; }
+    .auth-button, .auth-signout, .admin-link {
+      font: inherit; font-size:13px; cursor:pointer; border-radius:999px;
+      padding:7px 15px; border:1px solid rgba(201,163,73,.4); background:transparent;
+      color:#c9a349; text-decoration:none; line-height:1; white-space:nowrap;
+    }
+    .auth-button:hover, .auth-signout:hover, .admin-link:hover { border-color:#c9a349; background:rgba(201,163,73,.12); }
+    .auth-account { display:flex; align-items:center; gap:8px; }
+    .admin-link { border-color:rgba(201,163,73,.55); }
+    .admin-delete {
+      font: inherit; font-size:12px; cursor:pointer; border-radius:999px;
+      padding:5px 11px; border:1px solid rgba(210,120,100,.5); background:rgba(210,120,100,.1);
+      color:#e0a094; line-height:1; white-space:nowrap;
+    }
+    .admin-delete:hover { border-color:#d2786b; background:rgba(210,120,100,.2); color:#f0c4ba; }
+    .admin-delete.card { margin-top:8px; }
+    .answer-nav { display:flex; align-items:center; gap:10px; }
+    .answer-nav .admin-delete.detail { margin-right:auto; }
+    .auth-modal { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .auth-modal[hidden] { display:none; }
+    .auth-backdrop { position:absolute; inset:0; background:rgba(12,10,8,.72); backdrop-filter:blur(4px); }
+    .auth-card {
+      position:relative; width:min(440px,100%); background:#1c1a17; color:#efe9dd;
+      border:1px solid rgba(201,163,73,.28); border-radius:20px; padding:34px 30px 28px;
+      box-shadow:0 30px 80px rgba(0,0,0,.5); text-align:center; max-height:92vh; overflow:auto;
+    }
+    .auth-x { position:absolute; top:12px; right:14px; background:none; border:none; color:#a99f8c; font-size:26px; line-height:1; cursor:pointer; }
+    .auth-x:hover { color:#efe9dd; }
+    .auth-kicker { font-family:Fraunces,Georgia,serif; color:#c9a349; font-size:22px; margin:0 0 4px; }
+    .auth-card h2 { font-family:Fraunces,Georgia,serif; font-weight:500; font-size:22px; margin:0 0 10px; }
+    .auth-lede { color:#a99f8c; font-size:14px; margin:0 0 20px; }
+    .auth-google {
+      width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+      background:#fff; color:#1a1a1a; border:none; border-radius:12px; padding:12px;
+      font:inherit; font-weight:600; cursor:pointer;
+    }
+    .auth-google:hover { background:#f1f1f1; }
+    .auth-divider { display:flex; align-items:center; gap:10px; color:#a99f8c; font-size:12px; margin:16px 0; }
+    .auth-divider::before, .auth-divider::after { content:""; flex:1; height:1px; background:rgba(201,163,73,.2); }
+    .auth-email-form { display:flex; flex-direction:column; gap:10px; }
+    .auth-email-form input { background:#232019; border:1px solid rgba(201,163,73,.22); color:#efe9dd; border-radius:12px; padding:12px; font:inherit; }
+    .auth-email-form input:focus { outline:none; border-color:#c9a349; }
+    .auth-email-form button { background:rgba(201,163,73,.14); border:1px solid #c9a349; color:#c9a349; border-radius:12px; padding:12px; font:inherit; font-weight:600; cursor:pointer; }
+    .auth-email-form button:hover { background:rgba(201,163,73,.24); }
+    .auth-status { min-height:18px; font-size:13px; color:#a99f8c; margin:12px 0 0; }
+    .auth-status[data-tone="error"] { color:#d98b7a; }
+    .auth-status[data-tone="success"] { color:#8bbf74; }
+    .auth-fineprint { color:#7d735f; font-size:11.5px; margin:12px 0 0; }
+    @media (max-width:640px) {
+      .header-actions { gap:6px; }
+      .auth-button, .auth-signout, .admin-link { padding:6px 11px; font-size:12px; }
+    }
+  </style>
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <span class="header-spacer" aria-hidden="true"></span>
+    <span class="bh" aria-label="With G-d’s help">ב״ה</span>
+    <div class="header-actions">
+      <button class="feed-jump" type="button" data-scroll-target="feed" aria-label="Open the public index">Open index</button>
+      <div id="auth-slot" class="auth-slot" aria-live="polite">
+        <button class="auth-button" type="button" data-auth-open hidden>Sign in</button>
+        <div class="auth-account" hidden>
+          <a class="admin-link" href="/admin" hidden>Admin</a>
+          <button class="auth-signout" type="button" data-auth-signout>Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <figure class="medallion">
+        <img src="/images/rebbe-portrait-close.png" alt="The Lubavitcher Rebbe">
+      </figure>
+      <p class="hero-kicker">Making the Rebbe’s teachings more accessible</p>
+      <h1 id="hero-title">What does the Rebbe say about <i>…</i></h1>
+      <p class="hero-intro">Ask a question, read a careful synthesis, and follow every answer back to its original sources.</p>
+
+      <form id="question-form" class="ask-form">
+        <label class="sr-only" for="question">What would you like to research?</label>
+        <div class="input-row">
+          <input id="question" name="question" type="text" minlength="2" maxlength="500" autocomplete="off" aria-autocomplete="list" aria-controls="question-suggestions" aria-expanded="false" placeholder="raising confident children" required>
+          <button type="submit"><span>Begin Research</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></button>
+        </div>
+        <div id="question-suggestions" class="question-suggestions" role="listbox" aria-label="Existing questions and answers" hidden></div>
+        <div class="form-meta">
+          <span class="char-counter"><span id="char-count">0</span> / 500</span>
+          <p id="form-status" role="status">Your question becomes a permanent public research page.</p>
+        </div>
+        <div class="prompt-row" aria-label="Suggested topics">
+          <span>Try</span>
+          <button type="button" data-prompt="dealing with anxiety">Anxiety</button>
+          <button type="button" data-prompt="raising confident children">Parenting</button>
+          <button type="button" data-prompt="earning a livelihood with integrity">Livelihood</button>
+          <button type="button" data-prompt="using technology with intention">Technology</button>
+        </div>
+      </form>
+      <p class="hero-note">Not a chatbot · Not an opinion engine · A research starting point</p>
+    </section>
+
+    <section id="feed" class="index-section" aria-labelledby="feed-title">
+      <div class="index-wrap">
+        <div class="index-heading">
+          <div><p class="section-kicker">Public research archive</p><h2 id="feed-title">The Index</h2></div>
+          <p>A living archive of questions, sources, and teachings—built in public.</p>
+        </div>
+      </div>
+      <div class="filterbar">
+        <div class="index-wrap filterbar-inner">
+          <div class="keyword-filter" aria-label="Explore by topic">
+            <div id="keyword-filter-list"></div>
+          </div>
+          <div class="feed-views" aria-label="Sort the index">
+            <span>Sort</span>
+            <button type="button" class="active" data-feed-view="newest" aria-pressed="true">Newest</button>
+            <button type="button" data-feed-view="loved" aria-pressed="false">Most loved</button>
+            <button type="button" data-feed-view="hearted" aria-pressed="false">My hearts</button>
+          </div>
+        </div>
+      </div>
+      <div class="index-wrap">
+        <div id="feed-list" class="feed-list"></div>
+        <div class="feed-count"><span id="feed-status" role="status">Loading the archive…</span><button id="refresh-feed" type="button">Refresh ↻</button></div>
+      </div>
+    </section>
+
+    <section id="detail" class="detail" hidden aria-live="polite"></section>
+  </main>
+
+  <footer><p>Made with Moby 🐳 &amp; love ❤️</p></footer>
+
+  <div id="auth-modal" class="auth-modal" hidden aria-hidden="true">
+    <div class="auth-backdrop" data-auth-close></div>
+    <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title" tabindex="-1">
+      <button class="auth-x" type="button" data-auth-close aria-label="Close sign-in">×</button>
+      <p class="auth-kicker">ב״ה</p>
+      <h2 id="auth-title">Sign in to begin research</h2>
+      <p class="auth-lede">Browsing the archive is open to all. Starting a new research question takes a moment to sign in—so every question has a name behind it.</p>
+      <button class="auth-google" type="button" data-auth-google>
+        <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.9-3c-1 .7-2.4 1.1-4 1.1-3 0-5.6-2-6.5-4.8h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.5 14.3a7.2 7.2 0 0 1 0-4.6v-3H1.5a12 12 0 0 0 0 10.7z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 12 0 12 12 0 0 0 1.5 6.7l4 3.1C6.4 6.8 9 4.8 12 4.8z"/></svg>
+        Continue with Google
+      </button>
+      <div class="auth-divider"><span>or</span></div>
+      <form class="auth-email-form" data-auth-email>
+        <label class="sr-only" for="auth-email">Email address</label>
+        <input id="auth-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+        <button type="submit">Email me a sign-in link</button>
+      </form>
+      <p class="auth-status" role="status"></p>
+      <p class="auth-fineprint">We only use your identity to attribute the questions you start. No spam.</p>
+    </div>
+  </div>
+</body>
+</html>
