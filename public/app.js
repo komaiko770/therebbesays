@@ -7,9 +7,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSess
 // Feature flag: when false, new-research submission is open (no sign-in required).
 // Flip to true once Supabase Auth is configured to enforce the sign-in gate.
 const AUTH_GATE_ENABLED = false;
-// Feature flag: Google OAuth is not yet enabled in Supabase Auth (provider disabled).
-// Flip to true (and unhide the button in index.html) once the Google provider is configured.
-const GOOGLE_AUTH_ENABLED = false;
+// Google OAuth is enabled in Supabase Auth (provider configured 2026-07-24).
+const GOOGLE_AUTH_ENABLED = true;
 
 const state = { questions: [], query: '', feedView:'newest', activeKeyword:'', suggestionIndex:-1 };
 const auth = { session: null, isAdmin: false, pending: null, ready: false };
