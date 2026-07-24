@@ -87,7 +87,6 @@
     <span class="header-spacer" aria-hidden="true"></span>
     <span class="bh" aria-label="With G-d’s help">ב״ה</span>
     <div class="header-actions">
-      <button class="feed-jump" type="button" data-scroll-target="feed" aria-label="Open the public index">Open index</button>
       <div id="auth-slot" class="auth-slot" aria-live="polite">
         <button class="auth-button" type="button" data-auth-open hidden>Sign in</button>
         <div class="auth-account" hidden>
@@ -132,8 +131,8 @@
     <section id="feed" class="index-section" aria-labelledby="feed-title">
       <div class="index-wrap">
         <div class="index-heading">
-          <div><p class="section-kicker">Public research archive</p><h2 id="feed-title">The Index</h2></div>
-          <p>A living archive of questions, sources, and teachings—built in public.</p>
+          <div><p class="section-kicker">Live public research</p><h2 id="feed-title">The Feed</h2></div>
+          <p>A living feed of questions, sources, and teachings—growing in real time, built in public.</p>
         </div>
       </div>
       <div class="filterbar">
@@ -141,7 +140,7 @@
           <div class="keyword-filter" aria-label="Explore by topic">
             <div id="keyword-filter-list"></div>
           </div>
-          <div class="feed-views" aria-label="Sort the index">
+          <div class="feed-views" aria-label="Sort the feed">
             <span>Sort</span>
             <button type="button" class="active" data-feed-view="newest" aria-pressed="true">Newest</button>
             <button type="button" data-feed-view="loved" aria-pressed="false">Most loved</button>
@@ -151,7 +150,7 @@
       </div>
       <div class="index-wrap">
         <div id="feed-list" class="feed-list"></div>
-        <div class="feed-count"><span id="feed-status" role="status">Loading the archive…</span><button id="refresh-feed" type="button">Refresh ↻</button></div>
+        <div class="feed-count"><span id="feed-status" role="status">Loading the feed…</span><button id="refresh-feed" type="button">Refresh ↻</button></div>
       </div>
     </section>
 
@@ -166,12 +165,13 @@
       <button class="auth-x" type="button" data-auth-close aria-label="Close sign-in">×</button>
       <p class="auth-kicker">ב״ה</p>
       <h2 id="auth-title">Sign in to begin research</h2>
-      <p class="auth-lede">Browsing the archive is open to all. Starting a new research question takes a moment to sign in—so every question has a name behind it.</p>
-      <button class="auth-google" type="button" data-auth-google>
+      <p class="auth-lede">Browsing the feed is open to all. Starting a new research question takes a moment to sign in—so every question has a name behind it.</p>
+      <!-- Google sign-in is hidden until the Google provider is enabled in Supabase Auth. Remove the hidden attributes (and flip GOOGLE_AUTH_ENABLED in app.js) once configured. -->
+      <button class="auth-google" type="button" data-auth-google hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.9-3c-1 .7-2.4 1.1-4 1.1-3 0-5.6-2-6.5-4.8h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.5 14.3a7.2 7.2 0 0 1 0-4.6v-3H1.5a12 12 0 0 0 0 10.7z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 12 0 12 12 0 0 0 1.5 6.7l4 3.1C6.4 6.8 9 4.8 12 4.8z"/></svg>
         Continue with Google
       </button>
-      <div class="auth-divider"><span>or</span></div>
+      <div class="auth-divider" hidden><span>or</span></div>
       <form class="auth-email-form" data-auth-email>
         <label class="sr-only" for="auth-email">Email address</label>
         <input id="auth-email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>

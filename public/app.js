@@ -7,6 +7,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSess
 // Feature flag: when false, new-research submission is open (no sign-in required).
 // Flip to true once Supabase Auth is configured to enforce the sign-in gate.
 const AUTH_GATE_ENABLED = false;
+// Feature flag: Google OAuth is not yet enabled in Supabase Auth (provider disabled).
+// Flip to true (and unhide the button in index.html) once the Google provider is configured.
+const GOOGLE_AUTH_ENABLED = false;
 
 const state = { questions: [], query: '', feedView:'newest', activeKeyword:'', suggestionIndex:-1 };
 const auth = { session: null, isAdmin: false, pending: null, ready: false };
@@ -287,7 +290,7 @@ function articleDiscovery(currentSlug) {
     <div class="article-discovery-head">
       <p class="eyebrow">Continue exploring</p>
       <h3 id="article-discovery-title">One answer usually leads to another question.</h3>
-      <a href="/">Browse the full public index <span aria-hidden="true">↗</span></a>
+      <a href="/">Browse the full feed <span aria-hidden="true">↗</span></a>
     </div>
     <div class="article-teaser-window"><div class="teaser-track article-teaser-track">${sequence.map((entry, index) => teaserCardMarkup(entry, index, index >= 5)).join('')}</div></div>
   </section>`;
@@ -482,6 +485,10 @@ async function handleAuthChange(session) {
 }
 
 async function signInWithGoogle() {
+  if (!GOOGLE_AUTH_ENABLED) {
+    setAuthStatus('Google sign-in is coming soon — use the email link below for now.', 'info');
+    return;
+  }
   setAuthStatus('Redirecting to Google…', 'info');
   const { error } = await supabase.auth.signInWithOAuth({ provider:'google', options:{ redirectTo: redirectTarget() } });
   if (error) setAuthStatus(error.message || 'Google sign-in is unavailable right now.', 'error');
@@ -619,7 +626,7 @@ function renderFeed() {
 }
 
 async function loadFeed({ quiet = false } = {}) {
-  if (!quiet) feedStatus.textContent = 'Loading the archive…';
+  if (!quiet) feedStatus.textContent = 'Loading the feed…';
   try {
     const data = await api('?limit=80');
     state.questions = Array.isArray(data) ? data : [];
@@ -628,7 +635,7 @@ async function loadFeed({ quiet = false } = {}) {
     if (slug && (detail.hidden || detail.dataset.slug !== decodeURIComponent(slug))) openQuestion(decodeURIComponent(slug), false);
   } catch (error) {
     feedStatus.textContent = error.message;
-    feedList.innerHTML = '<div class="empty">The archive is temporarily unavailable.</div>';
+    feedList.innerHTML = '<div class="empty">The feed is temporarily unavailable.</div>';
   }
 }
 
@@ -709,7 +716,7 @@ function renderDetail(item, shouldScroll = true) {
   detail.innerHTML = `<div class="detail-backdrop" data-close-answer aria-hidden="true"></div><div class="detail-inner${item.image_url ? ' has-hero-image' : ''}" tabindex="-1">
     <nav class="answer-nav" aria-label="Answer page navigation">
       ${adminDeleteButton(item,'detail')}
-      <button class="answer-close" type="button" data-close-answer aria-label="Close this answer and return to the public index">×</button>
+      <button class="answer-close" type="button" data-close-answer aria-label="Close this answer and return to the feed">×</button>
     </nav>
     ${item.image_url ? `<figure class="answer-hero-image"><img src="${escapeHtml(item.image_url)}" alt="Editorial image for ${escapeHtml(topicText(item.question))}"><figcaption class="answer-hero-title">${escapeHtml(questionText(item.question))}</figcaption></figure>` : ''}
     <div class="modal-layout"><main class="modal-answer-main">
