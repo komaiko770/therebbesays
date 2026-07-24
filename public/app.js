@@ -581,7 +581,9 @@ function renderKeywordFilters() {
   const counts = new Map();
   state.questions.forEach(item => keywordsFor(item).forEach(keyword => counts.set(keyword,(counts.get(keyword) || 0) + 1)));
   const keywords = [...counts].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0,10);
-  keywordFilterList.innerHTML = [`<button type="button" data-keyword="" class="${state.activeKeyword ? '' : 'active'}">All</button>`, ...keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`)].join('')}
+  keywordFilterList.innerHTML = [`<button type="button" data-keyword="" class="${state.activeKeyword ? '' : 'active'}">All</button>`, ...keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`)].join('');
+}
+
 function renderFeed() {
   renderTeasers();
   renderKeywordFilters();
@@ -637,3 +639,392 @@ function statusCopy(item) {
   if (item.status === 'failed') return 'The research process did not complete successfully and will need to be retried.';
   return '';
 }
+
+function researchLoader(item) {
+  const queued = item.status === 'queued';
+  return `<div class="research-loader" aria-live="polite">
+    <div class="research-orbit" aria-hidden="true"><span></span><i></i></div>
+    <div class="research-progress">
+      <div class="research-progress-head"><strong>${queued ? 'Joining the research queue' : 'Research in progress'}</strong><span class="live-dot">Live</span></div>
+      <p>${escapeHtml(statusCopy(item))}</p>
+      <div class="research-stages" aria-label="Research stages">
+        <span class="active">Searching source archives</span>
+        <span>Reading relevant texts</span>
+        <span>Checking citations</span>
+        <span>Preparing the answer</span>
+      </div>
+      <small>No refresh needed. This page checks for the completed answer every five seconds.</small>
+    </div>
+  </div>`;
+}
+
+function startResearchExperience(item) {
+  clearInterval(detailPollTimer);
+  clearInterval(researchStageTimer);
+  if (!['queued', 'researching'].includes(item.status)) return;
+
+  let stage = 0;
+  researchStageTimer = setInterval(() => {
+    const stages = [...detail.querySelectorAll('.research-stages span')];
+    if (!stages.length) return;
+    if (stage >= stages.length - 1) {
+      clearInterval(researchStageTimer);
+      return;
+    }
+    stages[stage].classList.remove('active');
+    stages[stage].classList.add('complete');
+    stage += 1;
+    stages[stage].classList.add('active');
+  }, 6500);
+
+  detailPollTimer = setInterval(async () => {
+    try {
+      const data = await api(`?slug=${encodeURIComponent(item.slug)}&limit=1`);
+      const fresh = data[0];
+      if (!fresh) return;
+      const index = state.questions.findIndex(question => question.slug === fresh.slug);
+      if (index >= 0) state.questions[index] = fresh;
+      if (fresh.status !== item.status || fresh.updated_at !== item.updated_at) {
+        renderFeed();
+        renderDetail(fresh, false);
+      }
+    } catch (error) {
+      console.warn('Background answer check failed', error);
+    }
+  }, 5000);
+}
+
+function renderDetail(item, shouldScroll = true) {
+  const sources = (item.sources || []).sort((a,b) => a.ordinal - b.ordinal);
+  const answerText = item.answer_markdown || item.short_answer || '';
+  const { orderedSources, displayByOrdinal } = citationDisplay(answerText, sources);
+  const answerSections = splitAnswerSections(answerText);
+  const sourceMaterial = sourcesMarkup(orderedSources, displayByOrdinal);
+  document.body.classList.add('modal-open');
+  detail.hidden = false;
+  detail.setAttribute('role','dialog');
+  detail.setAttribute('aria-modal','true');
+  detail.setAttribute('aria-label',questionText(item.question));
+  detail.dataset.slug = item.slug;
+  detail.innerHTML = `<div class="detail-backdrop" data-close-answer aria-hidden="true"></div><div class="detail-inner${item.image_url ? ' has-hero-image' : ''}" tabindex="-1">
+    <nav class="answer-nav" aria-label="Answer page navigation">
+      ${adminDeleteButton(item,'detail')}
+      <button class="answer-close" type="button" data-close-answer aria-label="Close this answer and return to the public index">×</button>
+    </nav>
+    ${item.image_url ? `<figure class="answer-hero-image"><img src="${escapeHtml(item.image_url)}" alt="Editorial image for ${escapeHtml(topicText(item.question))}"><figcaption class="answer-hero-title">${escapeHtml(questionText(item.question))}</figcaption></figure>` : ''}
+    <div class="modal-layout"><main class="modal-answer-main">
+    <div class="answer-meta-row"><p class="eyebrow">${label(item.status)} · asked ${formatDate(item.created_at)}</p><div class="answer-reaction"><span>Was this question worth asking?</span>${heartButton(item, true)}</div></div>
+    ${item.image_url ? '' : `<h2>${escapeHtml(questionText(item.question))}</h2>`}
+    ${item.status === 'published'
+      ? `<div class="answer-tabs" role="tablist" aria-label="Answer sections">
+          <button type="button" role="tab" aria-selected="true" data-answer-tab="synthesis">Overview</button>
+          <button type="button" role="tab" aria-selected="false" data-answer-tab="sources">Source-by-source</button>
+        </div>
+        <section class="answer-tab-panel" role="tabpanel" data-answer-panel="synthesis">
+          <div class="answer-copy">${renderMarkdown(answerSections.synthesis || answerText, sources, displayByOrdinal)}</div>
+        </section>
+        <section class="answer-tab-panel source-outline" role="tabpanel" data-answer-panel="sources" hidden>
+          ${answerSections.sourceBySource ? renderSourceReader(answerSections.sourceBySource, orderedSources, displayByOrdinal, sourceMaterial) : `<p class="source-tab-intro">This earlier answer predates the source-by-source format. Its verified source trail is organized below.</p>${sourceMaterial}`}
+        </section>`
+      : ['queued', 'researching'].includes(item.status)
+        ? researchLoader(item)
+        : `<div class="status-panel"><strong>${label(item.status)}</strong><p>${escapeHtml(statusCopy(item))}</p></div>`}
+    </main><aside class="modal-topic-rail" aria-label="Answer sharing and topics">
+      ${sharePanel(item)}
+      <div class="topic-rail-block"><p>Topics in this answer</p>
+        <div>${keywordsFor(item).map(keyword => `<button type="button" data-keyword="${escapeHtml(keyword)}">${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div>
+      </div>
+    </aside></div>
+  </div>`;
+  requestAnimationFrame(() => activateInteractions(detail));
+  if (shouldScroll) detail.querySelector('.detail-inner')?.scrollTo({ top:0, behavior:'auto' });
+  requestAnimationFrame(() => detail.querySelector('.detail-inner')?.focus({ preventScroll:true }));
+  updatePageMeta(item);
+  startResearchExperience(item);
+}
+
+async function openQuestion(slug, updateHistory = true) {
+  if (updateHistory) history.pushState({ answer:slug },'',`/answer/${encodeURIComponent(slug)}`);
+  let item = state.questions.find(question => question.slug === slug);
+  if (!item) {
+    const data = await api(`?slug=${encodeURIComponent(slug)}&limit=1`);
+    item = data[0];
+  }
+  if (!item) return;
+  renderDetail(item);
+}
+
+function closeQuestion(updateHistory = true) {
+  clearInterval(detailPollTimer);
+  clearInterval(researchStageTimer);
+  detail.hidden = true;
+  detail.innerHTML = '';
+  delete detail.dataset.slug;
+  document.body.classList.remove('modal-open');
+  resetPageMeta();
+  if (updateHistory) {
+    if (history.state?.answer) history.back();
+    else history.replaceState({},'',`/${state.activeKeyword ? `?keyword=${encodeURIComponent(state.activeKeyword)}` : ''}`);
+  }
+  modalReturnFocus?.focus?.({ preventScroll:true });
+  modalReturnFocus = null;
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const matches = matchingQuestions(input.value);
+  if (state.suggestionIndex >= 0 && matches[state.suggestionIndex]) {
+    location.assign(`/answer/${encodeURIComponent(matches[state.suggestionIndex].slug)}`);
+    return;
+  }
+  const question = input.value.trim();
+  const button = form.querySelector('button[type="submit"]');
+  if (!ensureSignedIn(question, formStatus, button)) return;
+  await submitQuestion(question, formStatus, button);
+});
+
+input.addEventListener('input', () => {
+  charCount.textContent = String(input.value.length);
+  state.suggestionIndex = -1;
+  renderSuggestions();
+});
+input.addEventListener('keydown', event => {
+  const matches = matchingQuestions(input.value);
+  if (!matches.length) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    state.suggestionIndex = (state.suggestionIndex + 1) % matches.length;
+    renderSuggestions();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    state.suggestionIndex = state.suggestionIndex <= 0 ? matches.length - 1 : state.suggestionIndex - 1;
+    renderSuggestions();
+  } else if (event.key === 'Escape') {
+    closeSuggestions();
+  }
+});
+input.addEventListener('focus', renderSuggestions);
+suggestions?.addEventListener('click', event => {
+  const option = event.target.closest('[data-suggestion-slug]');
+  if (option) location.assign(`/answer/${encodeURIComponent(option.dataset.suggestionSlug)}`);
+});
+suggestions?.addEventListener('wheel', event => {
+  const atTop = suggestions.scrollTop <= 0 && event.deltaY < 0;
+  const atBottom = suggestions.scrollTop + suggestions.clientHeight >= suggestions.scrollHeight - 1 && event.deltaY > 0;
+  event.stopPropagation();
+  if (atTop || atBottom) event.preventDefault();
+}, { passive:false });
+document.querySelector('.prompt-row')?.addEventListener('click', event => {
+  const prompt = event.target.closest('[data-prompt]');
+  if (!prompt) return;
+  input.value = prompt.dataset.prompt;
+  charCount.textContent = String(input.value.length);
+  input.focus();
+  renderSuggestions();
+});
+document.querySelector('#refresh-feed').addEventListener('click', () => loadFeed());
+document.querySelector('.feed-views')?.addEventListener('click', event => {
+  const control = event.target.closest('[data-feed-view]');
+  if (!control) return;
+  state.feedView = control.dataset.feedView;
+  document.querySelectorAll('[data-feed-view]').forEach(button => {
+    const active = button === control;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  renderFeed();
+});
+feedList.addEventListener('click', event => {
+  const del = event.target.closest('[data-admin-delete]');
+  if (del) { event.preventDefault(); deleteQuestion(del.dataset.adminDelete, del.dataset.adminSlug); return; }
+  const keyword = event.target.closest('[data-keyword]');
+  if (keyword) {
+    state.activeKeyword = keyword.dataset.keyword || '';
+    renderFeed();
+    document.getElementById('feed')?.scrollIntoView({ behavior:'smooth', block:'start' });
+    return;
+  }
+  const card = event.target.closest('[data-slug]');
+  if (card && !event.target.closest('a,button')) openQuestion(card.dataset.slug);
+});
+keywordFilterList?.addEventListener('click', event => {
+  const keyword = event.target.closest('[data-keyword]');
+  if (!keyword) return;
+  state.activeKeyword = keyword.dataset.keyword || '';
+  const url = new URL(location.href);
+  if (state.activeKeyword) url.searchParams.set('keyword',state.activeKeyword); else url.searchParams.delete('keyword');
+  history.replaceState({},'',url);
+  renderFeed();
+});
+
+/* Auth control wiring */
+authSlot?.addEventListener('click', event => {
+  if (event.target.closest('[data-auth-open]')) { openAuthModal(); return; }
+  if (event.target.closest('[data-auth-signout]')) { signOut(); return; }
+});
+authModal?.addEventListener('click', event => {
+  if (event.target.closest('[data-auth-close]')) { closeAuthModal(); return; }
+  if (event.target.closest('[data-auth-google]')) { signInWithGoogle(); return; }
+});
+authModal?.querySelector('[data-auth-email]')?.addEventListener('submit', event => {
+  event.preventDefault();
+  const email = event.target.elements.email.value.trim();
+  if (email) signInWithEmail(email);
+});
+
+document.addEventListener('click', async event => {
+  if (!event.target.closest('.ask-form')) closeSuggestions();
+  const sourceBrief = event.target.closest('[data-source-brief]');
+  if (sourceBrief) {
+    const reader = sourceBrief.closest('.source-reader');
+    const target = sourceBrief.dataset.sourceBrief;
+    reader?.querySelectorAll('[data-source-brief]').forEach(button => button.setAttribute('aria-selected', button === sourceBrief ? 'true' : 'false'));
+    reader?.querySelectorAll('[data-source-brief-panel]').forEach(panel => { panel.hidden = panel.dataset.sourceBriefPanel !== target; });
+    reader?.querySelector('.source-reader-detail')?.scrollTo({ top:0, behavior:'smooth' });
+    return;
+  }
+  const answerTab = event.target.closest('[data-answer-tab]');
+  if (answerTab) {
+    const target = answerTab.dataset.answerTab;
+    const tabRoot = answerTab.closest('.modal-answer-main');
+    tabRoot?.querySelectorAll('[data-answer-tab]').forEach(button => button.setAttribute('aria-selected', button === answerTab ? 'true' : 'false'));
+    tabRoot?.querySelectorAll('[data-answer-panel]').forEach(panel => { panel.hidden = panel.dataset.answerPanel !== target; });
+    return;
+  }
+  const citationLink = event.target.closest('.source-note>a');
+  if (citationLink && matchMedia('(hover: none)').matches) {
+    if (!citationLink.classList.contains('touch-preview')) {
+      event.preventDefault();
+      document.querySelectorAll('.source-note>a.touch-preview').forEach(link => link.classList.remove('touch-preview'));
+      positionCitationTooltip(citationLink);
+      citationLink.classList.add('touch-preview');
+      return;
+    }
+    citationLink.classList.remove('touch-preview');
+  } else if (!citationLink) {
+    document.querySelectorAll('.source-note>a.touch-preview').forEach(link => link.classList.remove('touch-preview'));
+  }
+  const adminDel = event.target.closest('[data-admin-delete]');
+  if (adminDel) { event.preventDefault(); deleteQuestion(adminDel.dataset.adminDelete, adminDel.dataset.adminSlug); return; }
+  const modalKeyword = event.target.closest('.modal-topic-rail [data-keyword]');
+  if (modalKeyword) {
+    state.activeKeyword = modalKeyword.dataset.keyword || '';
+    state.query = '';
+    input.value = '';
+    charCount.textContent = '0';
+    closeQuestion(false);
+    history.pushState({},'',`/?keyword=${encodeURIComponent(state.activeKeyword)}`);
+    renderFeed();
+    document.getElementById('feed')?.scrollIntoView({ behavior:'smooth', block:'start' });
+    return;
+  }
+  const closeAnswer = event.target.closest('[data-close-answer]');
+  if (closeAnswer) {
+    event.preventDefault();
+    closeQuestion(true);
+    return;
+  }
+  const answerLink = event.target.closest('a[href^="/answer/"]');
+  if (answerLink) {
+    event.preventDefault();
+    modalReturnFocus = answerLink;
+    openQuestion(decodeURIComponent(answerLink.getAttribute('href').replace(/^\/answer\//,'').split(/[?#]/)[0]));
+    return;
+  }
+  const heart = event.target.closest('[data-heart-question]');
+  if (heart) {
+    event.preventDefault();
+    await toggleHeart(heart.dataset.heartQuestion);
+    return;
+  }
+  const button = event.target.closest('[data-scroll-target]');
+  if (button) document.getElementById(button.dataset.scrollTarget)?.scrollIntoView({ behavior:'smooth', block:'start' });
+  const nativeShare = event.target.closest('[data-native-share]');
+  if (nativeShare) {
+    const status = nativeShare.closest('.share-panel')?.querySelector('.share-status');
+    if (navigator.share) navigator.share({ title:nativeShare.dataset.title, url:nativeShare.dataset.url }).catch(() => {});
+    else navigator.clipboard.writeText(nativeShare.dataset.url).then(() => { if (status) status.textContent = 'Link copied.'; });
+  }
+  const copyLink = event.target.closest('[data-copy-link]');
+  if (copyLink) {
+    const status = copyLink.closest('.share-panel')?.querySelector('.share-status');
+    navigator.clipboard.writeText(copyLink.dataset.url).then(() => {
+      if (status) status.textContent = 'Link copied.';
+      copyLink.classList.add('copied');
+      copyLink.setAttribute('title','Link copied');
+      setTimeout(() => { copyLink.classList.remove('copied'); copyLink.setAttribute('title','Copy link'); }, 1800);
+    });
+  }
+});
+document.addEventListener('pointermove', event => {
+  document.documentElement.style.setProperty('--pointer-x', `${event.clientX}px`);
+  document.documentElement.style.setProperty('--pointer-y', `${event.clientY}px`);
+  const surface = event.target.closest('.teaser-card,.method-grid article,.question-card,.source-entry');
+  if (!surface) return;
+  const bounds = surface.getBoundingClientRect();
+  surface.style.setProperty('--spot-x', `${event.clientX - bounds.left}px`);
+  surface.style.setProperty('--spot-y', `${event.clientY - bounds.top}px`);
+});
+document.addEventListener('pointerover', event => {
+  const citation = event.target.closest('.source-note>a');
+  if (citation) positionCitationTooltip(citation);
+});
+document.addEventListener('focusin', event => {
+  const citation = event.target.closest('.source-note>a');
+  if (citation) positionCitationTooltip(citation);
+});
+function updateSearchDock() {
+  const header = document.querySelector('.site-header');
+  if (!header || !form) return;
+  if (!searchPlaceholder) {
+    searchPlaceholder = document.createElement('div');
+    searchPlaceholder.className = 'search-placeholder';
+    searchPlaceholder.setAttribute('aria-hidden','true');
+    form.before(searchPlaceholder);
+  }
+  const shouldDock = searchPlaceholder.getBoundingClientRect().top <= header.getBoundingClientRect().bottom + 8;
+  if (shouldDock === searchDocked) return;
+  searchDocked = shouldDock;
+  if (shouldDock) {
+    searchPlaceholder.style.height = `${form.offsetHeight}px`;
+    header.insertBefore(form, header.querySelector('.header-actions'));
+    form.classList.add('is-docked');
+  } else {
+    searchPlaceholder.after(form);
+    form.classList.remove('is-docked');
+    searchPlaceholder.style.height = '0px';
+  }
+  header.classList.toggle('has-docked-search',shouldDock);
+}
+window.addEventListener('scroll', () => {
+  document.querySelector('.site-header')?.classList.toggle('is-scrolled', scrollY > 18);
+  updateSearchDock();
+}, { passive:true });
+window.addEventListener('resize', updateSearchDock, { passive:true });
+document.addEventListener('submit', async event => {
+  const articleForm = event.target.closest('.article-question-form');
+  if (!articleForm) return;
+  event.preventDefault();
+  const question = articleForm.elements.question.value.trim();
+  const button = articleForm.querySelector('button[type="submit"]');
+  const status = articleForm.querySelector('.article-form-status');
+  if (!ensureSignedIn(question, status, button)) return;
+  await submitQuestion(question, status, button);
+});
+window.addEventListener('popstate', () => {
+  const slug = location.pathname.match(/^\/answer\/([^/]+)/)?.[1];
+  if (slug) openQuestion(decodeURIComponent(slug), false);
+  else closeQuestion(false);
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !authModal.hidden) { closeAuthModal(); return; }
+  if (event.key === 'Escape' && !detail.hidden) closeQuestion(true);
+});
+
+supabase.auth.getSession().then(({ data }) => handleAuthChange(data.session));
+supabase.auth.onAuthStateChange((_event, session) => handleAuthChange(session));
+
+loadFeed();
+activateInteractions(document);
+requestAnimationFrame(updateSearchDock);
+setInterval(() => loadFeed({ quiet:true }), 15000);
