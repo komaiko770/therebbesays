@@ -1,10 +1,16 @@
 [build]
   publish = "public"
+  command = "node scripts/sync-assets.mjs"
   functions = "netlify/functions"
 
 [[redirects]]
   from = "/admin"
   to = "/admin.html"
+  status = 200
+
+[[redirects]]
+  from = "/images/*"
+  to = "https://euixoavdzwaactdbxnpk.supabase.co/storage/v1/object/public/site-assets/images/:splat"
   status = 200
 
 [[redirects]]
