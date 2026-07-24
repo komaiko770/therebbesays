@@ -35,3 +35,21 @@ footer{margin-top:22px;padding:27px;border-top:1px solid var(--line);text-align:
 .header-actions{grid-column:3;grid-row:1;justify-self:end;min-width:0}
 .auth-slot [hidden],.auth-card [hidden],.auth-account[hidden],.auth-button[hidden],.admin-link[hidden],.auth-divider[hidden],.auth-google[hidden],.auth-modal[hidden]{display:none!important}
 @media(max-width:760px){.site-header.has-docked-search .bh{display:none}.site-header .ask-form.is-docked{width:calc(100vw - 140px)}}
+
+/* Source pills: replace the Source-by-source tab with one color-coded pill per source */
+.answer-tabs.has-source-pills{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.answer-tabs.has-source-pills::-webkit-scrollbar{display:none}
+.source-pill{flex:none;display:inline-flex;align-items:center;gap:8px;max-width:280px;padding:8px 14px;border-radius:24px;border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.source-pill .pill-num{font-weight:600}
+.source-pill .pill-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-pill.pill-tm{color:#f0cd8d;border-color:rgba(226,189,124,.7);background:rgba(226,189,124,.15)}
+.source-pill.pill-tm .pill-num{color:var(--gold)}
+.source-pill.pill-ik{color:#dbe2ec;border-color:rgba(200,210,225,.6);background:rgba(200,210,225,.13)}
+.source-pill.pill-ik .pill-num{color:#aebacd}
+.source-pill.pill-tm[aria-selected=true]{color:#241a0b;background:var(--gold);border-color:var(--gold)}
+.source-pill.pill-tm[aria-selected=true] .pill-num{color:#4b3817}
+.source-pill.pill-ik[aria-selected=true]{color:#1c2430;background:#c6d0de;border-color:#c6d0de}
+.source-pill.pill-ik[aria-selected=true] .pill-num{color:#3a4657}
+.source-pill.pill-src[aria-selected=true]{color:#241a0b;background:var(--gold);border-color:var(--gold)}
+.detail-inner.has-source-pills .source-reader{grid-template-columns:1fr}
+.detail-inner.has-source-pills .source-reader-nav{display:none}
