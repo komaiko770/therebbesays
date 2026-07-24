@@ -700,6 +700,34 @@ function startResearchExperience(item) {
   }, 5000);
 }
 
+// Replace the "Source-by-source" tab with one color-coded pill per source, going across
+// horizontally (per design feedback). Toras Menachem pills are gold, Igros Kodesh pills
+// are silver, so the source collections are boldly distinguishable at a glance.
+function decorateSourcePills() {
+  const tabs = detail.querySelector('.answer-tabs');
+  if (!tabs) return;
+  const srcTab = tabs.querySelector('[data-answer-tab="sources"]');
+  const navButtons = [...detail.querySelectorAll('.source-reader-nav [data-source-brief]')];
+  if (!srcTab) return;
+  if (!navButtons.length) { srcTab.textContent = 'Sources'; return; }
+  const pillClass = title => /toras\s*menachem/i.test(title) ? 'pill-tm' : /(igros|igrot)\s*kodesh/i.test(title) ? 'pill-ik' : 'pill-src';
+  srcTab.remove();
+  navButtons.forEach((navButton, index) => {
+    const title = navButton.textContent.replace(/^\s*\d+\s*/, '').trim();
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = `source-pill ${pillClass(title)}`;
+    pill.dataset.answerTab = 'sources';
+    pill.dataset.sourcePill = String(index);
+    pill.setAttribute('role', 'tab');
+    pill.setAttribute('aria-selected', 'false');
+    pill.innerHTML = `<span class="pill-num">${String(index + 1).padStart(2, '0')}</span><span class="pill-title">${escapeHtml(title)}</span>`;
+    tabs.appendChild(pill);
+  });
+  tabs.classList.add('has-source-pills');
+  detail.querySelector('.detail-inner')?.classList.add('has-source-pills');
+}
+
 function renderDetail(item, shouldScroll = true) {
   const sources = (item.sources || []).sort((a,b) => a.ordinal - b.ordinal);
   const answerText = item.answer_markdown || item.short_answer || '';
@@ -742,6 +770,7 @@ function renderDetail(item, shouldScroll = true) {
       </div>
     </aside></div>
   </div>`;
+  decorateSourcePills();
   requestAnimationFrame(() => activateInteractions(detail));
   if (shouldScroll) detail.querySelector('.detail-inner')?.scrollTo({ top:0, behavior:'auto' });
   requestAnimationFrame(() => detail.querySelector('.detail-inner')?.focus({ preventScroll:true }));
@@ -895,6 +924,10 @@ document.addEventListener('click', async event => {
     const tabRoot = answerTab.closest('.modal-answer-main');
     tabRoot?.querySelectorAll('[data-answer-tab]').forEach(button => button.setAttribute('aria-selected', button === answerTab ? 'true' : 'false'));
     tabRoot?.querySelectorAll('[data-answer-panel]').forEach(panel => { panel.hidden = panel.dataset.answerPanel !== target; });
+    if (answerTab.dataset.sourcePill !== undefined) {
+      const briefButton = detail.querySelector(`.source-reader-nav [data-source-brief="${answerTab.dataset.sourcePill}"]`);
+      if (briefButton) briefButton.click();
+    }
     return;
   }
   const citationLink = event.target.closest('.source-note>a');
