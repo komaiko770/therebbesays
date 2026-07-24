@@ -112,6 +112,69 @@ async function loadStats() {
   }
 }
 
+// --- Articles management (admin delete) ---
+const articlesList = document.querySelector('#articles-list');
+const articlesSearch = document.querySelector('[data-article-search]');
+let allArticles = [];
+
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+function renderArticles() {
+  if (!articlesList) return;
+  const term = (articlesSearch?.value || '').trim().toLowerCase();
+  const rows = allArticles.filter(a => !term || (a.question || '').toLowerCase().includes(term));
+  if (!rows.length) {
+    articlesList.innerHTML = `<p class="empty-note">${allArticles.length ? 'No articles match that search.' : 'No articles yet.'}</p>`;
+    return;
+  }
+  articlesList.innerHTML = rows.map(a => `
+    <div class="article-row" data-id="${a.id}">
+      <div class="a-main">
+        <a href="/answer/${encodeURIComponent(a.slug)}" target="_blank" rel="noopener">${escapeHtml(a.question)}</a>
+        <span class="a-meta">${escapeHtml(a.status)} · ${fmtDay(String(a.created_at).slice(0, 10))} · ${Number(a.source_count) || 0} sources</span>
+      </div>
+      <button class="danger" type="button" data-delete="${a.id}">Delete</button>
+    </div>`).join('');
+}
+
+async function loadArticles() {
+  if (!articlesList) return;
+  const { data, error } = await supabase
+    .from('questions')
+    .select('id,slug,question,status,created_at,source_count')
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) {
+    articlesList.innerHTML = `<p class="empty-note">Could not load articles: ${escapeHtml(error.message)}</p>`;
+    return;
+  }
+  allArticles = data || [];
+  renderArticles();
+}
+
+articlesSearch?.addEventListener('input', renderArticles);
+articlesList?.addEventListener('click', async event => {
+  const btn = event.target.closest('[data-delete]');
+  if (!btn) return;
+  const id = btn.dataset.delete;
+  const article = allArticles.find(a => a.id === id);
+  if (!article) return;
+  const label = article.question.length > 90 ? `${article.question.slice(0, 90)}…` : article.question;
+  if (!window.confirm(`Permanently delete this article?\n\n“${label}”\n\nThis removes the article, its sources, and reader hearts. It cannot be undone.`)) return;
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  const { error } = await supabase.rpc('admin_delete_question', { p_id: id });
+  if (error) {
+    btn.disabled = false;
+    btn.textContent = 'Delete';
+    window.alert(`Could not delete: ${error.message}`);
+    return;
+  }
+  allArticles = allArticles.filter(a => a.id !== id);
+  renderArticles();
+  loadStats();
+});
+
 async function route(session) {
   ready = true;
   if (!session) {
@@ -125,7 +188,7 @@ async function route(session) {
   }
   hide(gate);
   show(dashboard);
-  await loadStats();
+  await Promise.all([loadStats(), loadArticles()]);
 }
 
 document.querySelector('[data-google]')?.addEventListener('click', async () => {
