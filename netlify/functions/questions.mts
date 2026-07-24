@@ -18,6 +18,13 @@ function getConfig() {
   return { url, key, edgeJwt };
 }
 
+// The custom corpus-grounded research pipeline (Toras Menachem / Igros Kodesh on
+// chabadlibrary.org) runs on Fly.io. ALL research goes through it — there is
+// deliberately NO fallback to the legacy web-search edge function, which cited
+// secondary web pages instead of the Rebbe's own words.
+const RESEARCH_WORKER_URL = Netlify.env.get("RESEARCH_WORKER_URL") || process.env.RESEARCH_WORKER_URL || "https://therebbesays-embed.fly.dev";
+const RESEARCH_WORKER_API_KEY = Netlify.env.get("RESEARCH_WORKER_API_KEY") || process.env.RESEARCH_WORKER_API_KEY || "";
+
 function headers(key: string, prefer?: string) {
   return {
     apikey: key,
@@ -44,18 +51,24 @@ async function verifyUser(url: string, apiKey: string, req: Request) {
   return user?.id ? { id: user.id, email: user.email || null } : null;
 }
 
-async function triggerResearch(url: string, edgeJwt: string, questionId: string) {
-  const response = await fetch(`${url}/functions/v1/research-question`, {
-    method: "POST",
-    headers: {
-      apikey: edgeJwt,
-      authorization: `Bearer ${edgeJwt}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ question_id: questionId }),
-  });
-  const body = await response.json().catch(() => ({}));
-  return { ok: response.ok, status: response.status, body };
+async function triggerResearch(questionId: string) {
+  if (!RESEARCH_WORKER_API_KEY) {
+    console.error("RESEARCH_WORKER_API_KEY is not configured; question stays queued until the pipeline can be triggered.");
+    return { ok: false, status: 0, body: { error: "Research pipeline key not configured" }, engine: "corpus-pipeline" };
+  }
+  try {
+    const response = await fetch(`${RESEARCH_WORKER_URL}/research`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": RESEARCH_WORKER_API_KEY },
+      body: JSON.stringify({ question_id: questionId }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 409) console.error(`Research pipeline returned ${response.status}`, body);
+    return { ok: response.ok, status: response.status, body, engine: "corpus-pipeline" };
+  } catch (error) {
+    console.error("Research pipeline unreachable", error);
+    return { ok: false, status: 0, body: { error: "Research pipeline unreachable" }, engine: "corpus-pipeline" };
+  }
 }
 
 export default async (req: Request, _context: Context) => {
@@ -138,7 +151,7 @@ export default async (req: Request, _context: Context) => {
       const existing = await existingResponse.json();
       if (Array.isArray(existing) && existing.length) {
         const research = ["queued", "failed"].includes(existing[0].status)
-          ? await triggerResearch(url, edgeJwt, existing[0].id)
+          ? await triggerResearch(existing[0].id)
           : null;
         return json({ question: existing[0], existing: true, research });
       }
@@ -153,7 +166,7 @@ export default async (req: Request, _context: Context) => {
         if (response.status === 409) return json({ error: "That question is already in the research queue." }, 409);
         return json({ error: data?.message || "The question could not be submitted." }, response.status);
       }
-      const research = await triggerResearch(url, edgeJwt, data[0].id);
+      const research = await triggerResearch(data[0].id);
       return json({ question: data[0], existing: false, research }, 201);
     }
 
