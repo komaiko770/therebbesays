@@ -1,0 +1,2 @@
+Deploy trigger: rebuild so newly added Netlify env secrets (RESEARCH_WORKER_API_KEY) reach the running functions.
+Triggered: 2026-07-24T19:33Z
