@@ -1,0 +1,1 @@
+2026-07-24T17:10Z v2: auth gate on, 770 preloader, source pills
