@@ -56,6 +56,16 @@
     .chart .bar { transition:opacity .15s; }
     .chart text { fill:var(--muted); font-size:10px; font-family:'JetBrains Mono',monospace; }
     .empty-note { color:var(--muted); font-size:13px; padding:18px 0; text-align:center; }
+    .a-search { width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); border-radius:12px; padding:11px 14px; font:inherit; font-size:14px; margin-bottom:12px; }
+    .article-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:11px 2px; border-top:1px solid rgba(201,163,73,.10); }
+    .article-row:first-of-type { border-top:none; }
+    .article-row .a-main { min-width:0; }
+    .article-row .a-main a { color:var(--ink); text-decoration:none; font-size:14px; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .article-row .a-main a:hover { color:var(--gold); }
+    .article-row .a-meta { color:var(--muted); font-size:12px; }
+    .danger { flex:none; background:transparent; border:1px solid rgba(217,139,122,.5); color:#d98b7a; border-radius:999px; padding:6px 14px; font:inherit; font-size:13px; cursor:pointer; }
+    .danger:hover { background:rgba(217,139,122,.12); border-color:#d98b7a; }
+    .danger[disabled] { opacity:.5; cursor:default; }
     footer.note { color:var(--muted); font-size:12px; text-align:center; margin-top:30px; }
     .hidden { display:none !important; }
   </style>
@@ -116,6 +126,13 @@
       <h3>Tokens per day</h3>
       <p class="sub">Input + output tokens consumed by the research pipeline, by day.</p>
       <div id="chart-tokens" class="chart"></div>
+    </div>
+
+    <div class="card">
+      <h3>Articles</h3>
+      <p class="sub">Delete articles you no longer want. Deleting is permanent — it removes the article, its sources, and reader hearts. Cost history is kept.</p>
+      <input class="a-search" type="search" placeholder="Search articles…" data-article-search>
+      <div id="articles-list"><p class="empty-note">Loading articles…</p></div>
     </div>
 
     <footer class="note" id="foot"></footer>
