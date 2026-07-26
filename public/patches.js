@@ -594,8 +594,9 @@ if (feedList) {
     }
     if (!panel.isConnected) bar.insertAdjacentElement('afterend', panel);
     panel.style.display = '';
-    tabs.forEach((t) => t.classList.remove('active'));
+    tabs.forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
   }
 
   function closeTrail(btn) {
@@ -603,6 +604,7 @@ if (feedList) {
     restoreList.forEach(([node, display]) => { node.style.display = display; });
     restoreList = [];
     btn?.classList.remove('active');
+    btn?.setAttribute('aria-selected', 'false');
   }
 
   async function ensureTab() {
@@ -610,19 +612,34 @@ if (feedList) {
     const detail = document.querySelector('#detail');
     if (!detail) return;
     if (detail.querySelector('.tw-trail-tab')) return;
-    const tabs = Array.from(detail.querySelectorAll('button'))
-      .filter((b) => /^(synthesis|source[- ]by[- ]source|overview)$/i.test((b.textContent || '').trim()));
-    if (tabs.length < 2) return;
+    // Tab detection (owner report, 26 Jul 19:42): the answer tabs were renamed
+    // to Overview / Toras Menachem / Igros Kodesh (with <small> counts), so the
+    // old text match ("Synthesis" / "Source-by-source") found fewer than two
+    // tabs and the trail tab silently stopped mounting — even on answers whose
+    // research_funnel was recorded. Match the structural tab bar first
+    // (.answer-tabs [data-answer-tab]); keep the text match only as a fallback
+    // for any older markup.
+    const answerBar = detail.querySelector('.answer-tabs');
+    const tabs = answerBar
+      ? Array.from(answerBar.querySelectorAll('button[data-answer-tab]'))
+      : Array.from(detail.querySelectorAll('button'))
+          .filter((b) => /^(synthesis|source[- ]by[- ]source|overview)$/i.test((b.textContent || '').trim()));
+    if (!tabs.length) return;
     const slug = decodeURIComponent(location.pathname.match(/^\/answer\/([^/]+)/)?.[1] || '');
     const row = await fetchFunnel(slug).catch(() => null);
     const panel = row ? buildPanel(row) : null;
     if (!panel) return; // no funnel recorded (pre-logging question) — no tab.
     if (detail.querySelector('.tw-trail-tab')) return; // re-check after await
-    const bar = tabs[0].parentElement;
+    const bar = answerBar || tabs[0].parentElement;
     const btn = tabs[0].cloneNode(false);
     btn.className = tabs[0].className;
     btn.classList.remove('active');
     btn.classList.add('tw-trail-tab');
+    // The clone carries the Overview tab's data-answer-tab and aria-selected —
+    // strip both, or app.js's global tab handler hijacks the click (showing
+    // the Overview panel instead of the trail) and the tab renders selected.
+    btn.removeAttribute('data-answer-tab');
+    btn.setAttribute('aria-selected', 'false');
     btn.type = 'button';
     btn.textContent = 'Research trail';
     bar.appendChild(btn);
