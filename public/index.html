@@ -111,6 +111,12 @@
        lost to the ticker's stacking level. Only the form is lifted; the video
        and scrim stay at z:0, and modals/preloader (z 1200+) remain above. */
     .hero .ask-form { z-index:120; }
+    /* ...but NEVER above an open modal (owner screenshots, 26 Jul 19:49-19:50):
+       the z:120 lift made the search bar bleed through the answer modal. Both
+       the answer modal and the sign-in modal add body.modal-open, so the lift
+       is dropped back to the hero's normal level whenever any modal is up —
+       the autocomplete dropdown is irrelevant while a modal covers the page. */
+    body.modal-open .hero .ask-form { z-index:1; }
     /* Feed heading removed as visual noise (owner screenshot, 26 Jul) —
        the feed content itself starts right after the hero. */
     .index-section { padding-top:10px; }
