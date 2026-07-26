@@ -31,14 +31,14 @@
 // (indices remapped to the global candidate list), and any batch that comes back with
 // zero verdicts is retried once before being given up on.
 //
-// KNOWN OPEN GAP (see ../README.md "Known gap" section): this verification stage does
-// NOT yet reliably distinguish parnassah-driven pragmatism (a person studying Torah
-// part-time because they need to earn a living — an old, universal, non-ideological
-// situation) from genuine ideological-synthesis questions (e.g. Modern Orthodoxy as a
-// deliberate philosophical stance). Three rounds of prompt refinement improved this but
-// did not fully close it. The adversarial_check.survives_count/refuted_count fields on
-// each verdict are exposed specifically so a confidence signal (e.g. a 2-1 split vote)
-// can be surfaced downstream rather than silently treated the same as a clean 3-0.
+// SIMCHA POSTMORTEM #2 (26 Jul, evening): a batch came back with `verdicts` as a
+// STRING containing malformed JSON — an unescaped quote inside one justification
+// broke JSON.parse, and the old code threw, failing the entire run. But the
+// justification text is only commentary; the pipeline decisions ride solely on
+// (index, verdict). So an unparseable string is now salvaged with a tolerant regex
+// that extracts every (index, verdict) pair it can find; if salvage yields nothing,
+// the batch reports zero verdicts and flows into the existing retry-once path
+// instead of killing the whole question.
 
 import { callClaudeTool } from "./anthropicClient.ts";
 import type { Candidate, RefutationResult, AdversarialVoteResult, Verdict, VerificationResult } from "./types.ts";
@@ -88,6 +88,25 @@ const REFUTE_TOOL = {
     required: ["verdict", "justification"],
   },
 };
+
+// Tolerant recovery for the "verdicts came back as malformed JSON text" glitch
+// (simcha postmortem #2): pull out every (index, verdict[, justification]) trio the
+// regex can find. Justification capture is best-effort — it may be cut short by the
+// very quoting error that broke JSON.parse — but index + verdict are what the
+// pipeline actually runs on.
+function salvageVerdictsFromString(raw: string): { index: number; verdict: string; justification: string }[] {
+  const out: { index: number; verdict: string; justification: string }[] = [];
+  const re = /"index"\s*:\s*(\d+)\s*,\s*"verdict"\s*:\s*"(GENUINE|TANGENTIAL|FALSE_POSITIVE)"(?:\s*,\s*"justification"\s*:\s*"((?:[^"\\]|\\.)*)")?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    out.push({
+      index: Number(m[1]),
+      verdict: m[2],
+      justification: m[3] ?? "(justification lost to malformed model output)",
+    });
+  }
+  return out;
+}
 
 function buildPrompt(question: string, candidates: Candidate[], topicGuidance: string): string {
   const candidateBlocks = candidates.map((c, i) =>
@@ -139,11 +158,18 @@ async function classifyBatch(
   let verdictsRaw = result.verdicts as unknown;
   if (typeof verdictsRaw === "string") {
     // Occasional tool-calling glitch: the model emits the array as a JSON-encoded
-    // string instead of an actual array. Parse it rather than iterate characters.
+    // string instead of an actual array. Parse it; if the string itself is malformed
+    // JSON (unescaped quote inside a justification — simcha postmortem #2), salvage
+    // the (index, verdict) pairs with a tolerant regex instead of failing the run.
     try {
       verdictsRaw = JSON.parse(verdictsRaw);
     } catch (e) {
-      throw new Error(`'verdicts' came back as an unparseable string: ${e}\nRaw: ${String(verdictsRaw).slice(0, 500)}`);
+      const salvaged = salvageVerdictsFromString(String(verdictsRaw));
+      console.warn(
+        `WARNING: 'verdicts' string was unparseable JSON (${e}); ` +
+        `salvaged ${salvaged.length}/${slice.length} verdicts via tolerant extraction`,
+      );
+      verdictsRaw = salvaged; // if empty, the zero-verdict retry path below handles it
     }
   }
 
