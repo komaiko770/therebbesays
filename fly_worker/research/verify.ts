@@ -14,6 +14,14 @@
 // Since the target is fully automated operation (no human reviewing output before it's
 // used), both passes are the default, not optional.
 //
+// MOROCCO POSTMORTEM (26 Jul): for a question naming a place/community, pass 1 accepted
+// only 11 of 60 candidates and the adversarial vote refuted 5 of those 11 — because the
+// rubric demanded passages that "assert something about the topic itself," which
+// wrongly rejects the Rebbe's actual place-related material: concrete letters directing
+// that place's schools, emissaries, and communal life. Both prompts now state explicitly
+// that for place/community/institution questions, concrete operational letters ARE the
+// genuine evidence.
+//
 // KNOWN OPEN GAP (see ../README.md "Known gap" section): this verification stage does
 // NOT yet reliably distinguish parnassah-driven pragmatism (a person studying Torah
 // part-time because they need to earn a living — an old, universal, non-ideological
@@ -91,6 +99,8 @@ For EACH candidate, read its full text carefully (not just skim) and classify it
 
 If the question names an ideology, movement, or named concept (e.g. "Modern Orthodoxy," "Zionism"): real correspondence with real people almost never names the abstract movement — it addresses concrete individual situations that instantiate the same underlying question. A passage that substantively engages the SAME underlying tension/question — even without using the movement's name — should be treated as GENUINE evidence of the Rebbe's view on it, not excluded on a technicality of naming. Don't require the passage to discuss the ideology in the abstract if it's already showing the Rebbe's actual position through a concrete case.
 
+If the question names a PLACE, COUNTRY, COMMUNITY, or INSTITUTION (e.g. "Morocco"): the Rebbe's engagement with a place lives almost entirely in concrete letters — direction to its rabbis and emissaries, instructions about its schools and institutions, responses to its communal events and struggles, encouragement and concern for its Jews. A passage giving real guidance about, or expressing a real position on, Jewish life IN that place is GENUINE evidence, even if it reads as operational or administrative rather than philosophical. Do not demand an abstract essay about the place — in real correspondence such essays essentially don't exist; the concrete letters ARE what the Rebbe "says about" that place. Only mark such a passage TANGENTIAL if the place is truly incidental to it (e.g. merely part of an address or an itinerary mention with no substance about the place's Jewish life).
+
 Be rigorous and skeptical — err toward TANGENTIAL or FALSE_POSITIVE unless the passage really does make its own assertion about the specific question asked. This step exists to catch retrieval mistakes before they reach a published answer, so don't be lenient.
 
 Candidates:
@@ -164,7 +174,7 @@ A prior reviewer classified the passage below as GENUINE — direct, substantive
 
 The ONE specific failure mode to check for: does the passage only SUPERFICIALLY resemble the question's topic, while actually arising from a completely different underlying cause or context? For example: coercion/persecution dressed up as if it were a chosen ideology or stance, a different historical era whose surface details happen to match, or a different sense of a similar-sounding word or concept. That is a real error a first-pass reviewer can make while sounding entirely plausible.
 
-This is NOT the same as: a genuine, direct historical account of the actual topic (even a specific instance or anecdote), a real quotable assertion the Rebbe makes about it, or a passage that is merely brief rather than exhaustive. None of those are reasons to refute — a source doesn't need to be long, airtight, or discuss the topic "in the abstract" to be genuine evidence; a concrete real example of the Rebbe's own view, stated plainly, is exactly what good evidence looks like. For instance, if a letter directly quotes the Rebbe describing how the actual founding community of a named approach concluded, in practice, that the approach didn't work — that is strong, direct evidence *for* the classification, not a "narrow anecdote" to be dismissed.
+This is NOT the same as: a genuine, direct historical account of the actual topic (even a specific instance or anecdote), a real quotable assertion the Rebbe makes about it, or a passage that is merely brief rather than exhaustive. None of those are reasons to refute — a source doesn't need to be long, airtight, or discuss the topic "in the abstract" to be genuine evidence; a concrete real example of the Rebbe's own view, stated plainly, is exactly what good evidence looks like. For instance, if a letter directly quotes the Rebbe describing how the actual founding community of a named approach concluded, in practice, that the approach didn't work — that is strong, direct evidence *for* the classification, not a "narrow anecdote" to be dismissed. Likewise, for a question naming a PLACE or COMMUNITY: a concrete, even administrative-sounding letter giving real direction about Jewish life there (its schools, emissaries, institutions, communal affairs) is genuine evidence of the Rebbe's engagement and position on that place — being "operational," "narrow," or "administrative" is NOT a reason to refute it.
 
 Also check: is the original justification actually supported by what the text says, or does it describe content that simply isn't in this passage (e.g. content that actually belongs to a different chunk)? That is a real error worth catching. But if the justification accurately describes what's in the passage, and the passage is really about the topic rather than a different underlying cause, the classification should survive — say so plainly.
 
