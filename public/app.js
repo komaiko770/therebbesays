@@ -4,6 +4,21 @@ const SUPABASE_URL = 'https://euixoavdzwaactdbxnpk.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
+// Single shared Supabase client for the whole page. patches.js reuses this instead of
+// creating a second GoTrueClient — two clients on one storage key wedged auth entirely
+// (getSession never resolved: sign-in buttons stayed hidden, OAuth sessions dropped).
+window.__twSupabase = supabase;
+
+// A question typed before sign-in, persisted across the full-page OAuth/magic-link
+// redirect so research starts automatically the moment the user returns signed in.
+const PENDING_KEY = 'tw-pending-question';
+const readPendingQuestion = () => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null');
+    return stored?.question && Date.now() - (stored.at || 0) < 30 * 60 * 1000 ? stored.question : null;
+  } catch { return null; }
+};
+
 // Feature flag: when false, new-research submission is open (no sign-in required).
 // Flip to true once Supabase Auth is configured to enforce the sign-in gate.
 const AUTH_GATE_ENABLED = false;
@@ -405,7 +420,7 @@ async function api(path = '', options = {}) {
   const authHeader = auth.session?.access_token ? { authorization: `Bearer ${auth.session.access_token}` } : {};
   const response = await fetch(`/api/questions${path}`, { ...options, headers: { 'content-type':'application/json', 'x-visitor-id':visitorId, ...authHeader, ...(options.headers || {}) } });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  if (!response.ok) { const error = new Error(data.error || 'Something went wrong.'); error.status = response.status; throw error; }
   return data;
 }
 
@@ -455,7 +470,9 @@ function refreshAuthUI() {
 async function refreshAdminFlag() {
   if (!auth.session) { auth.isAdmin = false; return; }
   try {
-    const { data, error } = await supabase.rpc('is_admin');
+    // Never let a wedged RPC block the auth UI: cap the admin check at 2s.
+    const timeout = new Promise(resolve => setTimeout(() => resolve({ data:null, error:new Error('is_admin timeout') }), 2000));
+    const { data, error } = await Promise.race([supabase.rpc('is_admin'), timeout]);
     auth.isAdmin = !error && data === true;
   } catch { auth.isAdmin = false; }
 }
@@ -464,6 +481,7 @@ async function handleAuthChange(session) {
   const wasSignedIn = Boolean(auth.session);
   auth.session = session || null;
   auth.ready = true;
+  refreshAuthUI();
   await refreshAdminFlag();
   refreshAuthUI();
   // Re-render surfaces that depend on admin controls.
@@ -472,12 +490,24 @@ async function handleAuthChange(session) {
     const current = state.questions.find(q => q.slug === detail.dataset.slug);
     if (current) renderDetail(current, false);
   }
-  // Resume a pending question after a fresh sign-in.
-  if (auth.session && !wasSignedIn && auth.pending) {
-    const pending = auth.pending;
+  // Resume a pending question after a fresh sign-in: in-memory for same-page modal
+  // flows, localStorage for full-page OAuth/magic-link redirects (the typed question
+  // would otherwise be lost — owner report, 26 Jul).
+  if (auth.session && !wasSignedIn) {
+    let pending = auth.pending;
     auth.pending = null;
+    const storedQuestion = readPendingQuestion();
+    try { localStorage.removeItem(PENDING_KEY); } catch {}
+    if (!pending && storedQuestion) {
+      pending = { question: storedQuestion, statusEl: formStatus, button: form?.querySelector('button[type="submit"]') };
+    }
     closeAuthModal();
-    await submitQuestion(pending.question, pending.statusEl, pending.button);
+    if (pending) {
+      if (input) { input.value = pending.question; }
+      if (charCount) charCount.textContent = String((pending.question || '').length);
+      if (pending.statusEl) pending.statusEl.textContent = 'Signed in — starting your research…';
+      await submitQuestion(pending.question, pending.statusEl, pending.button);
+    }
   } else if (auth.session) {
     closeAuthModal();
   }
@@ -497,7 +527,7 @@ async function signInWithEmail(email) {
   setAuthStatus('Sending your sign-in link…', 'info');
   const { error } = await supabase.auth.signInWithOtp({ email, options:{ emailRedirectTo: redirectTarget() } });
   if (error) setAuthStatus(error.message || 'We could not send the link. Please try again.', 'error');
-  else setAuthStatus('Check your inbox for a one-time sign-in link.', 'success');
+  else setAuthStatus('Check your inbox for a one-time sign-in link. Your research will start automatically after you sign in.', 'success');
 }
 
 async function signOut() {
@@ -508,8 +538,10 @@ function ensureSignedIn(question, statusEl, button) {
   if (!AUTH_GATE_ENABLED) return true;
   if (auth.session) return true;
   auth.pending = { question, statusEl, button };
+  // Survive the full-page OAuth/magic-link redirect: persist the typed question.
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify({ question, at: Date.now() })); } catch {}
   if (statusEl) statusEl.textContent = 'Please sign in to start new research.';
-  openAuthModal('Sign in to save and publish your research question.');
+  openAuthModal('Sign in to begin — your research will start automatically right after.');
   return false;
 }
 
@@ -522,6 +554,7 @@ async function submitQuestion(question, statusEl, button) {
     if (statusEl) statusEl.textContent = result.existing ? 'That question is already in the archive.' : 'Question saved. Its public research page is ready.';
     if (input) { input.value = ''; }
     if (charCount) charCount.textContent = '0';
+    try { localStorage.removeItem(PENDING_KEY); } catch {}
     location.assign(`/answer/${encodeURIComponent(result.question.slug)}`);
   } catch (error) {
     if (error?.status === 401 || /sign in/i.test(error?.message || '')) {
@@ -1060,8 +1093,47 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !detail.hidden) closeQuestion(true);
 });
 
-supabase.auth.getSession().then(({ data }) => handleAuthChange(data.session));
+/* ---------- Auth bootstrap ---------- */
+// Deterministic auth-callback absorption: explicitly consume OAuth/magic-link tokens
+// from the return URL (implicit-flow hash or PKCE ?code) instead of relying only on
+// detectSessionInUrl, then hand off to normal session handling. This is what makes
+// Google/magic-link sign-in actually stick (owner video, 26 Jul).
+async function absorbAuthCallback() {
+  try {
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const access_token = hashParams.get('access_token');
+    const refresh_token = hashParams.get('refresh_token');
+    if (access_token && refresh_token) {
+      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      if (!error) history.replaceState(history.state, '', location.pathname + location.search);
+      return;
+    }
+    const code = new URLSearchParams(location.search).get('code');
+    if (code) {
+      await supabase.auth.exchangeCodeForSession(code);
+      const cleaned = new URL(location.href);
+      cleaned.searchParams.delete('code');
+      history.replaceState(history.state, '', cleaned.pathname + (cleaned.searchParams.toString() ? `?${cleaned.searchParams}` : ''));
+    }
+  } catch (error) {
+    console.warn('Auth callback handling failed', error);
+  }
+}
+
 supabase.auth.onAuthStateChange((_event, session) => handleAuthChange(session));
+absorbAuthCallback().finally(() => {
+  supabase.auth.getSession().then(({ data }) => handleAuthChange(data.session)).catch(() => handleAuthChange(null));
+});
+// Failsafe: if the auth client ever wedges again, read the persisted session straight
+// from storage after 2.5s so the header auth controls are never stuck hidden.
+setTimeout(() => {
+  if (auth.ready) return;
+  try {
+    const raw = JSON.parse(localStorage.getItem('sb-euixoavdzwaactdbxnpk-auth-token') || 'null');
+    const stored = raw?.access_token ? raw : raw?.currentSession || null;
+    handleAuthChange(stored);
+  } catch { handleAuthChange(null); }
+}, 2500);
 
 loadFeed();
 activateInteractions(document);
