@@ -175,7 +175,9 @@ function renderSourceBriefBody(value = '', sources = [], displayByOrdinal = new 
   return `${intro ? `<div class="source-brief-intro">${renderMarkdown(intro, sources, displayByOrdinal)}</div>` : ''}<div class="source-brief-fields">${fields.map(field => `<section class="source-brief-field"><h4>${escapeHtml(field.label)}</h4><div>${field.body ? renderMarkdown(field.body, sources, displayByOrdinal) : '<p>Not specified in this source brief.</p>'}</div></section>`).join('')}</div>`;
 }
 
-function renderSourceReader(value = '', sources = [], displayByOrdinal = new Map(), sourceMaterial = '') {
+// Build the per-source brief list from the "Source-by-source" markdown, falling back
+// to the raw sources when the structured section is missing or single-bodied.
+function buildSourceBriefs(value = '', sources = []) {
   let briefs = parseSourceBriefs(value);
   if (briefs.length < 2 && sources.length > 1) {
     const structuredBody = briefs[0]?.body || '';
@@ -188,10 +190,23 @@ function renderSourceReader(value = '', sources = [], displayByOrdinal = new Map
       source
     }));
   }
+  return briefs;
+}
+
+// Which collection a source brief belongs to (owner design, 26 Jul): one tab per
+// collection — Toras Menachem (gold) and Igros Kodesh (silver) — not one pill per source.
+const briefCollection = brief => {
+  const haystack = `${brief.title || ''} ${brief.source?.original_source_title || ''} ${brief.source?.title || ''}`;
+  if (/toras\s*menachem/i.test(haystack)) return 'tm';
+  if (/(igros|igrot)\s*kodesh/i.test(haystack)) return 'ik';
+  return 'other';
+};
+
+function renderSourceReader(briefs, sources = [], displayByOrdinal = new Map()) {
   if (!briefs.length) return `<p class="source-tab-intro">No structured source briefs are available for this answer yet.</p>`;
   const nav = briefs.map((brief,index) => `<button type="button" data-source-brief="${index}" aria-selected="${index === 0 ? 'true' : 'false'}"><span>${String(index + 1).padStart(2,'0')}</span>${escapeHtml(brief.title)}</button>`).join('');
   const panels = briefs.map((brief,index) => `<article class="source-brief-panel" data-source-brief-panel="${index}" ${index ? 'hidden' : ''}><p class="source-brief-kicker">Source ${String(index + 1).padStart(2,'0')} of ${String(briefs.length).padStart(2,'0')}</p><h3>${escapeHtml(brief.title)}</h3><div class="answer-copy">${brief.body ? renderSourceBriefBody(brief.body, sources, displayByOrdinal) : '<p>This source is part of the verified citation trail for this answer.</p>'}</div>${brief.source?.url ? `<a class="source-brief-link" href="${escapeHtml(brief.source.url)}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : ''}</article>`).join('');
-  return `<div class="source-reader"><nav class="source-reader-nav" aria-label="Source briefs">${nav}</nav><div class="source-reader-detail">${panels}</div></div>${sourceMaterial ? `<details class="source-directory"><summary>All cited sources (${sources.length})</summary>${sourceMaterial}</details>` : ''}`;
+  return `<div class="source-reader"><nav class="source-reader-nav" aria-label="Source briefs">${nav}</nav><div class="source-reader-detail">${panels}</div></div>`;
 }
 function sourcesMarkup(orderedSources, displayByOrdinal) {
   if (!orderedSources.length) return '';
@@ -802,40 +817,22 @@ function startResearchExperience(item) {
   }, 5000);
 }
 
-// Replace the "Source-by-source" tab with one color-coded pill per source, going across
-// horizontally (per design feedback). Toras Menachem pills are gold, Igros Kodesh pills
-// are silver, so the source collections are boldly distinguishable at a glance.
-function decorateSourcePills() {
-  const tabs = detail.querySelector('.answer-tabs');
-  if (!tabs) return;
-  const srcTab = tabs.querySelector('[data-answer-tab="sources"]');
-  const navButtons = [...detail.querySelectorAll('.source-reader-nav [data-source-brief]')];
-  if (!srcTab) return;
-  if (!navButtons.length) { srcTab.textContent = 'Sources'; return; }
-  const pillClass = title => /toras\s*menachem/i.test(title) ? 'pill-tm' : /(igros|igrot)\s*kodesh/i.test(title) ? 'pill-ik' : 'pill-src';
-  srcTab.remove();
-  navButtons.forEach((navButton, index) => {
-    const title = navButton.textContent.replace(/^\s*\d+\s*/, '').trim();
-    const pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = `source-pill ${pillClass(title)}`;
-    pill.dataset.answerTab = 'sources';
-    pill.dataset.sourcePill = String(index);
-    pill.setAttribute('role', 'tab');
-    pill.setAttribute('aria-selected', 'false');
-    pill.innerHTML = `<span class="pill-num">${String(index + 1).padStart(2, '0')}</span><span class="pill-title">${escapeHtml(title)}</span>`;
-    tabs.appendChild(pill);
-  });
-  tabs.classList.add('has-source-pills');
-  detail.querySelector('.detail-inner')?.classList.add('has-source-pills');
-}
-
 function renderDetail(item, shouldScroll = true) {
   const sources = (item.sources || []).sort((a,b) => a.ordinal - b.ordinal);
   const answerText = item.answer_markdown || item.short_answer || '';
   const { orderedSources, displayByOrdinal } = citationDisplay(answerText, sources);
   const answerSections = splitAnswerSections(answerText);
   const sourceMaterial = sourcesMarkup(orderedSources, displayByOrdinal);
+  // One tab per source COLLECTION (owner design, 26 Jul): Overview, Toras Menachem,
+  // Igros Kodesh — each collection tab lists its sources vertically on the left with
+  // the selected source brief on the right.
+  const briefs = item.status === 'published' ? buildSourceBriefs(answerSections.sourceBySource, orderedSources) : [];
+  const groups = [
+    ['tm', 'Toras Menachem', 'tab-tm'],
+    ['ik', 'Igros Kodesh', 'tab-ik'],
+    ['other', 'More sources', 'tab-other'],
+  ].map(([key, groupLabel, cls]) => ({ key, label: groupLabel, cls, briefs: briefs.filter(brief => briefCollection(brief) === key) }))
+   .filter(group => group.briefs.length);
   document.body.classList.add('modal-open');
   detail.hidden = false;
   detail.setAttribute('role','dialog');
@@ -854,14 +851,17 @@ function renderDetail(item, shouldScroll = true) {
     ${item.status === 'published'
       ? `<div class="answer-tabs" role="tablist" aria-label="Answer sections">
           <button type="button" role="tab" aria-selected="true" data-answer-tab="synthesis">Overview</button>
-          <button type="button" role="tab" aria-selected="false" data-answer-tab="sources">Source-by-source</button>
+          ${groups.length
+            ? groups.map(group => `<button type="button" role="tab" aria-selected="false" class="${group.cls}" data-answer-tab="src-${group.key}">${group.label}&nbsp;<small>${group.briefs.length}</small></button>`).join('')
+            : `<button type="button" role="tab" aria-selected="false" data-answer-tab="sources">Sources</button>`}
         </div>
         <section class="answer-tab-panel" role="tabpanel" data-answer-panel="synthesis">
           <div class="answer-copy">${renderMarkdown(answerSections.synthesis || answerText, sources, displayByOrdinal)}</div>
+          ${sourceMaterial ? `<details class="source-directory"><summary>All cited sources (${orderedSources.length})</summary>${sourceMaterial}</details>` : ''}
         </section>
-        <section class="answer-tab-panel source-outline" role="tabpanel" data-answer-panel="sources" hidden>
-          ${answerSections.sourceBySource ? renderSourceReader(answerSections.sourceBySource, orderedSources, displayByOrdinal, sourceMaterial) : `<p class="source-tab-intro">This earlier answer predates the source-by-source format. Its verified source trail is organized below.</p>${sourceMaterial}`}
-        </section>`
+        ${groups.length
+          ? groups.map(group => `<section class="answer-tab-panel source-outline" role="tabpanel" data-answer-panel="src-${group.key}" hidden>${renderSourceReader(group.briefs, orderedSources, displayByOrdinal)}</section>`).join('')
+          : `<section class="answer-tab-panel source-outline" role="tabpanel" data-answer-panel="sources" hidden><p class="source-tab-intro">This earlier answer predates the source-by-source format. Its verified source trail is organized below.</p>${sourceMaterial}</section>`}`
       : ['queued', 'researching'].includes(item.status)
         ? researchLoader(item)
         : `<div class="status-panel"><strong>${label(item.status)}</strong><p>${escapeHtml(statusCopy(item))}</p></div>`}
@@ -872,7 +872,6 @@ function renderDetail(item, shouldScroll = true) {
       </div>
     </aside></div>
   </div>`;
-  decorateSourcePills();
   requestAnimationFrame(() => activateInteractions(detail));
   if (shouldScroll) detail.querySelector('.detail-inner')?.scrollTo({ top:0, behavior:'auto' });
   requestAnimationFrame(() => detail.querySelector('.detail-inner')?.focus({ preventScroll:true }));
@@ -1029,10 +1028,6 @@ document.addEventListener('click', async event => {
     const tabRoot = answerTab.closest('.modal-answer-main');
     tabRoot?.querySelectorAll('[data-answer-tab]').forEach(button => button.setAttribute('aria-selected', button === answerTab ? 'true' : 'false'));
     tabRoot?.querySelectorAll('[data-answer-panel]').forEach(panel => { panel.hidden = panel.dataset.answerPanel !== target; });
-    if (answerTab.dataset.sourcePill !== undefined) {
-      const briefButton = detail.querySelector(`.source-reader-nav [data-source-brief="${answerTab.dataset.sourcePill}"]`);
-      if (briefButton) briefButton.click();
-    }
     return;
   }
   const citationLink = event.target.closest('.source-note>a');
