@@ -58,18 +58,29 @@ async function triggerResearch(questionId: string) {
     console.error("RESEARCH_WORKER_API_KEY is not configured; question stays queued until the pipeline can be triggered.");
     return { ok: false, status: 0, body: { error: "Research pipeline key not configured" }, engine: "corpus-pipeline" };
   }
+  // The worker replies 202 immediately (research runs as its own background task), but
+  // a cold Fly machine can stall this call. Never let it block the user's response:
+  // cap it at 8s. A timed-out trigger is not fatal — the question stays queued and the
+  // existing-question re-trigger path / queue sweeper picks it up.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch(`${RESEARCH_WORKER_URL}/research`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": RESEARCH_WORKER_API_KEY },
       body: JSON.stringify({ question_id: questionId }),
+      signal: controller.signal,
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok && response.status !== 409) console.error(`Research pipeline returned ${response.status}`, body);
     return { ok: response.ok, status: response.status, body, engine: "corpus-pipeline" };
   } catch (error) {
-    console.error("Research pipeline unreachable", error);
-    return { ok: false, status: 0, body: { error: "Research pipeline unreachable" }, engine: "corpus-pipeline" };
+    const timedOut = error instanceof Error && error.name === "AbortError";
+    if (!timedOut) console.error("Research pipeline unreachable", error);
+    else console.error("Research trigger timed out after 8s; question remains queued for the sweeper.");
+    return { ok: false, status: timedOut ? 504 : 0, body: { error: timedOut ? "Research trigger timed out; it will be retried" : "Research pipeline unreachable" }, engine: "corpus-pipeline" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
