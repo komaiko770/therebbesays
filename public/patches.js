@@ -99,7 +99,7 @@ const overlayCss = `
 #tw-research-overlay .tw-kicker{color:#c9a349;font-family:Fraunces,Georgia,serif;font-size:20px;margin:0}
 #tw-research-overlay h1{font-family:Fraunces,Georgia,serif;font-weight:500;font-size:clamp(26px,4.6vw,38px);margin:8px 0 4px}
 #tw-research-overlay .tw-q{color:#a99f8c;font-style:italic;margin:0 0 12px;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#tw-research-overlay .tw-770{width:min(270px,62vw);height:auto;margin:4px auto 6px;display:block}
+#tw-research-overlay .tw-770{width:min(235px,56vw);height:auto;margin:4px auto 6px;display:block}
 #tw-research-overlay .tw-770-outline{stroke:rgba(201,163,73,.42);stroke-width:2;fill:none}
 #tw-research-overlay .tw-770-detail{stroke:rgba(201,163,73,.32);stroke-width:1.4;fill:none}
 #tw-research-overlay .tw-770-spark{stroke:#f6d998;stroke-width:3;fill:none;stroke-linecap:round;stroke-dasharray:9 91;animation:twTrace 3.4s linear infinite;filter:url(#twGlow770)}
@@ -124,7 +124,7 @@ const overlayCss = `
 #tw-research-overlay .tw-back{position:fixed;top:16px;right:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
 #tw-research-overlay .tw-back:hover{background:rgba(201,163,73,.12)}
 @media (max-height:780px){
-  #tw-research-overlay .tw-770{width:min(215px,54vw)}
+  #tw-research-overlay .tw-770{width:min(190px,50vw)}
   #tw-research-overlay h1{font-size:clamp(23px,4vw,30px)}
   #tw-research-overlay .tw-stage{padding:6px 0 6px 26px}
   #tw-research-overlay .tw-stage.active{padding:8px 0 8px 26px}
@@ -132,7 +132,7 @@ const overlayCss = `
   #tw-research-overlay .tw-stage.active::before{top:14px}
 }
 @media (max-height:660px){
-  #tw-research-overlay .tw-770{width:min(160px,44vw)}
+  #tw-research-overlay .tw-770{width:min(150px,42vw)}
   #tw-research-overlay .tw-note{display:none}
   #tw-research-overlay .tw-kicker{font-size:16px}
   #tw-research-overlay .tw-stage{padding:4px 0 4px 26px}
@@ -147,40 +147,42 @@ const overlayCss = `
 // the CENTER peak highest, three stories of paired windows, gable attic windows,
 // and the arched center entrance with "770" above it. A glowing spark endlessly
 // traces the silhouette.
+// (26 Jul, evening) Owner: still reads too wide for its height - facade narrowed
+// again (180-wide viewBox, steeper gables), now nearly square overall.
 const SVG_770 = `
-<svg class="tw-770" viewBox="0 0 220 170" aria-hidden="true" role="img">
+<svg class="tw-770" viewBox="0 0 180 170" aria-hidden="true" role="img">
   <defs>
     <filter id="twGlow770" x="-30%" y="-30%" width="160%" height="160%">
       <feGaussianBlur stdDeviation="2.2" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <path class="tw-770-outline" d="M10 160 L10 64 L43 22 L76 64 L77 64 L110 14 L143 64 L144 64 L177 22 L210 64 L210 160 Z"/>
+  <path class="tw-770-outline" d="M15 160 L15 64 L40 22 L64 64 L65 64 L90 14 L115 64 L116 64 L140 22 L165 64 L165 160 Z"/>
   <g class="tw-770-detail">
-    <path d="M98 160 v-22 a12 12 0 0 1 24 0 v22"/>
-    <rect x="22" y="126" width="13" height="18" rx="1"/>
-    <rect x="45" y="126" width="13" height="18" rx="1"/>
-    <rect x="162" y="126" width="13" height="18" rx="1"/>
-    <rect x="185" y="126" width="13" height="18" rx="1"/>
-    <rect x="22" y="98" width="13" height="18" rx="1"/>
-    <rect x="45" y="98" width="13" height="18" rx="1"/>
-    <rect x="86" y="98" width="13" height="18" rx="1"/>
-    <rect x="121" y="98" width="13" height="18" rx="1"/>
-    <rect x="162" y="98" width="13" height="18" rx="1"/>
-    <rect x="185" y="98" width="13" height="18" rx="1"/>
-    <rect x="22" y="72" width="13" height="16" rx="1"/>
-    <rect x="45" y="72" width="13" height="16" rx="1"/>
-    <rect x="86" y="72" width="13" height="16" rx="1"/>
-    <rect x="121" y="72" width="13" height="16" rx="1"/>
-    <rect x="162" y="72" width="13" height="16" rx="1"/>
-    <rect x="185" y="72" width="13" height="16" rx="1"/>
-    <path d="M36 46 l7 -6 l7 6"/>
-    <path d="M103 38 l7 -6 l7 6"/>
-    <path d="M170 46 l7 -6 l7 6"/>
-    <path d="M10 94 H210"/>
+    <path d="M80 160 v-22 a10 10 0 0 1 20 0 v22"/>
+    <rect x="24" y="126" width="10" height="18" rx="1"/>
+    <rect x="41" y="126" width="10" height="18" rx="1"/>
+    <rect x="129" y="126" width="10" height="18" rx="1"/>
+    <rect x="146" y="126" width="10" height="18" rx="1"/>
+    <rect x="24" y="98" width="10" height="18" rx="1"/>
+    <rect x="41" y="98" width="10" height="18" rx="1"/>
+    <rect x="72" y="98" width="10" height="18" rx="1"/>
+    <rect x="98" y="98" width="10" height="18" rx="1"/>
+    <rect x="129" y="98" width="10" height="18" rx="1"/>
+    <rect x="146" y="98" width="10" height="18" rx="1"/>
+    <rect x="24" y="72" width="10" height="16" rx="1"/>
+    <rect x="41" y="72" width="10" height="16" rx="1"/>
+    <rect x="72" y="72" width="10" height="16" rx="1"/>
+    <rect x="98" y="72" width="10" height="16" rx="1"/>
+    <rect x="129" y="72" width="10" height="16" rx="1"/>
+    <rect x="146" y="72" width="10" height="16" rx="1"/>
+    <path d="M34 46 l6 -5 l6 5"/>
+    <path d="M84 38 l6 -5 l6 5"/>
+    <path d="M134 46 l6 -5 l6 5"/>
+    <path d="M15 94 H165"/>
   </g>
-  <text x="110" y="132" text-anchor="middle" font-family="Fraunces,Georgia,serif" font-size="12" fill="rgba(201,163,73,.85)">770</text>
-  <path class="tw-770-spark" pathLength="100" d="M10 160 L10 64 L43 22 L76 64 L77 64 L110 14 L143 64 L144 64 L177 22 L210 64 L210 160 Z"/>
+  <text x="90" y="132" text-anchor="middle" font-family="Fraunces,Georgia,serif" font-size="12" fill="rgba(201,163,73,.85)">770</text>
+  <path class="tw-770-spark" pathLength="100" d="M15 160 L15 64 L40 22 L64 64 L65 64 L90 14 L115 64 L116 64 L140 22 L165 64 L165 160 Z"/>
 </svg>`;
 
 function fmtElapsed(startIso) {
@@ -356,3 +358,48 @@ if (feedList) {
   new MutationObserver(fixEmptyState).observe(feedList, { childList: true });
   fixEmptyState();
 }
+
+// --- 4) Feed: in-progress cards get a mini 770 preloader, not a "01" number ---
+// Owner (26 Jul, evening): the numbered placeholder on queued/researching cards
+// read as content; replace it with a scaled-down version of the research
+// preloader's 770 facade, spark animation included, so "still being researched"
+// is legible at a glance. app.js re-renders the whole feed on each poll, so a
+// MutationObserver re-applies the swap after every render; published cards get
+// their image/number back automatically on the next render.
+(function feedProgressThumbs() {
+  const css = `
+#feed-list .card-thumb-progress{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(140px 110px at 50% 32%,#2a241c 0%,#151210 78%)}
+#feed-list .card-thumb-progress .tw-770{width:72%;height:auto;display:block}
+#feed-list .card-thumb-progress .tw-770-outline{stroke:rgba(201,163,73,.5);stroke-width:2.6;fill:none}
+#feed-list .card-thumb-progress .tw-770-detail{stroke:rgba(201,163,73,.3);stroke-width:1.7;fill:none}
+#feed-list .card-thumb-progress .tw-770-spark{stroke:#f6d998;stroke-width:4;fill:none;stroke-linecap:round;stroke-dasharray:9 91;animation:twTraceFeed 3.4s linear infinite}
+@keyframes twTraceFeed{to{stroke-dashoffset:-100}}
+`;
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  // Mini variant: drop the <defs> glow filter so repeated cards don't duplicate
+  // the filter id (the overlay keeps the glowing original).
+  const MINI_770 = SVG_770.replace(/<defs>[\s\S]*?<\/defs>\s*/, '');
+
+  function upgrade() {
+    document.querySelectorAll('#feed-list .index-card').forEach((card) => {
+      const thumb = card.querySelector('.card-thumb');
+      if (!thumb) return;
+      const inProgress = card.querySelector('.status.queued, .status.researching');
+      if (inProgress && !thumb.querySelector('.card-thumb-progress')) {
+        thumb.innerHTML = `<span class="card-thumb-progress" aria-hidden="true">${MINI_770}</span>`;
+      }
+    });
+  }
+
+  function init() {
+    const list = document.querySelector('#feed-list');
+    if (!list) return;
+    new MutationObserver(upgrade).observe(list, { childList: true, subtree: true });
+    upgrade();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
