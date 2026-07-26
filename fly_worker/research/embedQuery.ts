@@ -22,9 +22,20 @@
 // Required environment variables on the Supabase Edge Function:
 //   EMBEDDING_SERVICE_URL      — e.g. https://your-service.fly.dev
 //   EMBEDDING_SERVICE_API_KEY  — the shared secret set on the embedding_service host
+//
+// SIMCHA POSTMORTEM (26 Jul, attempt after deploy): this fetch had NO timeout.
+// When the worker picked up a job seconds after a `fly deploy` restarted the
+// machines, the embedding service was still loading the model and the request
+// hung indefinitely — the run sat at stage "retrieving" for 14+ minutes until
+// the stale-run watchdog reaped it. Now every attempt is capped at 60s and we
+// retry up to 3 times with a warm-up-friendly backoff (10s, 30s) so a job that
+// lands during a restart waits for the model instead of wedging the run.
 
 const EMBEDDING_SERVICE_URL = Deno.env.get("EMBEDDING_SERVICE_URL")!;
 const EMBEDDING_SERVICE_API_KEY = Deno.env.get("EMBEDDING_SERVICE_API_KEY")!;
+
+const EMBED_TIMEOUT_MS = 60_000;
+const EMBED_RETRY_DELAYS_MS = [10_000, 30_000];
 
 /**
  * Embeds a query string. The "query: " prefix e5 models require (vs. "passage: " for
@@ -32,24 +43,50 @@ const EMBEDDING_SERVICE_API_KEY = Deno.env.get("EMBEDDING_SERVICE_API_KEY")!;
  * embedding_service/app.py — callers here just send plain text.
  */
 export async function embedQuery(queryText: string): Promise<number[]> {
-  const res = await fetch(`${EMBEDDING_SERVICE_URL}/embed`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": EMBEDDING_SERVICE_API_KEY,
-    },
-    body: JSON.stringify({ text: queryText }),
-  });
-  if (!res.ok) {
-    throw new Error(`embedding_service /embed failed: ${res.status} ${await res.text()}`);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= EMBED_RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) {
+      const delay = EMBED_RETRY_DELAYS_MS[attempt - 1];
+      console.warn(`embedQuery: attempt ${attempt} failed (${lastError}); retrying in ${delay / 1000}s…`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    try {
+      const res = await fetch(`${EMBEDDING_SERVICE_URL}/embed`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": EMBEDDING_SERVICE_API_KEY,
+        },
+        body: JSON.stringify({ text: queryText }),
+        signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        const bodyText = await res.text();
+        // 5xx / 429 are transient (service restarting or busy) — retry those.
+        // 4xx auth/shape errors are permanent — fail immediately.
+        if (res.status >= 500 || res.status === 429) {
+          lastError = new Error(`embedding_service /embed failed: ${res.status} ${bodyText}`);
+          continue;
+        }
+        throw new Error(`embedding_service /embed failed: ${res.status} ${bodyText}`);
+      }
+      const payload = await res.json();
+      if (!Array.isArray(payload.embedding) || payload.embedding.length !== 768) {
+        throw new Error(
+          `embedding_service returned an unexpected shape (expected a 768-length array): ${JSON.stringify(payload).slice(0, 200)}`,
+        );
+      }
+      return payload.embedding as number[];
+    } catch (err) {
+      // AbortSignal timeout / network errors are transient — retry.
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError" || err.message.startsWith("embedding_service /embed failed: 5") || err.message.includes("error trying to connect") || err.message.includes("connection"))) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
   }
-  const payload = await res.json();
-  if (!Array.isArray(payload.embedding) || payload.embedding.length !== 768) {
-    throw new Error(
-      `embedding_service returned an unexpected shape (expected a 768-length array): ${JSON.stringify(payload).slice(0, 200)}`,
-    );
-  }
-  return payload.embedding as number[];
+  throw new Error(`embedding_service /embed failed after ${EMBED_RETRY_DELAYS_MS.length + 1} attempts: ${lastError}`);
 }
 
 /** Formats an embedding vector as pgvector's bracketed-text input format for RPC calls.
