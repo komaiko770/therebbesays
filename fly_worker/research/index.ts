@@ -26,12 +26,20 @@
 //      also records the pass-1 verdict breakdown and exactly which sources the
 //      adversarial vote refuted, so the next coverage complaint can be diagnosed from
 //      the database alone.
+//   7. VERSE/DAF CITATION ROUTE (26 Jul): one cheap up-front classification call
+//      (parseCitationQuestion, see citationLookup.ts) decides whether the question
+//      names a SPECIFIC Torah verse or Talmud Bavli daf. If yes, candidates come from
+//      a direct corpus_citations lookup (lookupCitationChunks) instead of semantic/
+//      keyword search; if no (the vast majority), execution proceeds through the exact
+//      same topical path as before. Both routes converge on the same verify() and
+//      synthesize() calls, and the funnel records which route ran.
 //
-// The pipeline (analyzeQuestion -> hybridSearchPerCollection -> reflectOnCandidates ->
-// verify -> synthesize) is unchanged.
+// The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
+// reflectOnCandidates -> verify -> synthesize) is unchanged.
 
 import { analyzeQuestion, reflectOnCandidates } from "./analyzeQuestion.ts";
 import { hybridSearchPerCollection } from "./retrieve.ts";
+import { parseCitationQuestion, lookupCitationChunks } from "./citationLookup.ts";
 import { verify } from "./verify.ts";
 import { synthesize } from "./synthesize.ts";
 import type { Candidate } from "./types.ts";
@@ -145,39 +153,79 @@ async function researchQuestion(question: Question) {
   const attempt = (question.research_attempts || 0) + 1;
   await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing" });
   try {
-    // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
-    const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
-    const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
+    // Step 0: decide citation vs. topical BEFORE doing anything else — one small,
+    // cheap classification call. A genuinely topical question (the vast majority)
+    // only pays the cost of this one extra call before proceeding exactly as before.
+    const citationParsed = await parseCitationQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
 
-    // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
-    await setStage(question.id, "retrieving");
-    const byCollection = await hybridSearchPerCollection(
-      SUPABASE_URL,
-      adminHeaders,
-      queryTexts,
-      analysis.keyword_terms,
-      TOP_K_PER_COLLECTION,
-    );
-    const candidates: Candidate[] = Object.values(byCollection).flat();
+    let candidates: Candidate[];
+    let topicGuidance: string;
+    let funnelQueries: Record<string, unknown>;
+    let retrievedByCollection: { toras_menachem: number; igrot_kodesh: number };
 
-    // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
-    await setStage(question.id, "reflecting");
-    const reflection = await reflectOnCandidates(
-      ANTHROPIC_API_KEY,
-      ANTHROPIC_MODEL,
-      question.question,
-      analysis.topic_guidance,
-      candidates,
-    );
+    if (citationParsed.is_citation_lookup) {
+      // Citation route: direct, precise lookup — no semantic/keyword search at all.
+      await setStage(question.id, "retrieving");
+      candidates = await lookupCitationChunks(SUPABASE_URL, adminHeaders, citationParsed.normalized_key, TOP_K_PER_COLLECTION);
+      topicGuidance =
+        `This is a direct citation lookup for ${citationParsed.book_or_tractate} ` +
+        `${citationParsed.chapter_or_daf}:${citationParsed.verse_or_amud} — every candidate was retrieved because ` +
+        `it cites this exact source in a footnote, not via semantic/keyword search. Classify GENUINE only if ` +
+        `the passage actually engages with or explains this source (not just a passing citation with no ` +
+        `substantive discussion).`;
+      funnelQueries = { citation_key: citationParsed.normalized_key };
+      retrievedByCollection = {
+        toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
+        igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
+      };
+    } else {
+      // Topical route — unchanged.
+      // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
+      const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+      const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
 
-    // Step 4: two-pass verification (classify, then adversarial vote on every GENUINE verdict).
+      // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
+      await setStage(question.id, "retrieving");
+      const byCollection = await hybridSearchPerCollection(
+        SUPABASE_URL,
+        adminHeaders,
+        queryTexts,
+        analysis.keyword_terms,
+        TOP_K_PER_COLLECTION,
+      );
+      candidates = Object.values(byCollection).flat();
+
+      // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
+      await setStage(question.id, "reflecting");
+      const reflection = await reflectOnCandidates(
+        ANTHROPIC_API_KEY,
+        ANTHROPIC_MODEL,
+        question.question,
+        analysis.topic_guidance,
+        candidates,
+      );
+      topicGuidance = reflection.updated_guidance;
+      funnelQueries = {
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
+      retrievedByCollection = {
+        toras_menachem: byCollection.toras_menachem?.length ?? 0,
+        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
+      };
+    }
+
+    // Step 4: two-pass verification (classify, then adversarial vote on every GENUINE
+    // verdict) — same call, same guidance shape, regardless of which route produced
+    // the candidates.
     await setStage(question.id, "verifying");
     const verified = await verify(
       ANTHROPIC_API_KEY,
       ANTHROPIC_MODEL,
       question.question,
       candidates,
-      reflection.updated_guidance,
+      topicGuidance,
       N_ADVERSARIAL_VOTERS,
     );
 
@@ -195,15 +243,12 @@ async function researchQuestion(question: Question) {
     const refutedVerdicts = verified.verdicts.filter((v) => v.adversarial_check?.verdict === "REFUTED");
     const refutedByVote = refutedVerdicts.length;
     const funnel = {
+      route: citationParsed.is_citation_lookup ? "citation" : "topical",
       top_k_per_collection: TOP_K_PER_COLLECTION,
-      queries: {
-        hebrew_query: analysis.hebrew_query,
-        alt_queries: analysis.alt_queries ?? [],
-        keyword_terms: analysis.keyword_terms,
-      },
+      queries: funnelQueries,
       retrieved: {
-        toras_menachem: byCollection.toras_menachem?.length ?? 0,
-        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
+        toras_menachem: retrievedByCollection.toras_menachem,
+        igrot_kodesh: retrievedByCollection.igrot_kodesh,
         total: candidates.length,
       },
       pass1_verdicts: {
