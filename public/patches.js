@@ -4,8 +4,8 @@
 //    (26 Jul PM): the chip must NOT appear on the article/answer modal — the
 //    feed header's sign-out is enough there. It only shows while the research
 //    preloader overlay is up (no other auth control is reachable then).
-//    (26 Jul, 19:00) Owner: swap back — sign-out chip now TOP-LEFT,
-//    Back-to-feed pill TOP-RIGHT.
+//    (26 Jul, 19:06, screenshot) Owner: Back-to-feed pill TOP-LEFT,
+//    sign-out chip TOP-RIGHT.
 // 2) Bold, truthful research preloader: driven entirely by real backend state
 //    (status, research_stage, research_started_at). It never invents progress and
 //    never resets on reload — elapsed time and stage come from the database.
@@ -47,10 +47,10 @@ function ensureAuthChip() {
   const chip = document.createElement('button');
   chip.id = 'tw-auth-chip';
   chip.type = 'button';
-  // Top-left (owner swap, 26 Jul 19:00): mirrors the Back-to-feed pill,
-  // which now sits top-right on the preloader.
+  // Top-right (owner screenshot, 26 Jul 19:06): mirrors the Back-to-feed pill,
+  // which sits top-left on the preloader.
   chip.style.cssText = [
-    'position:fixed', 'top:16px', 'left:16px', 'z-index:4000', 'display:none',
+    'position:fixed', 'top:16px', 'right:16px', 'z-index:4000', 'display:none',
     'font:600 13px Inter,system-ui,sans-serif', 'letter-spacing:.02em',
     'padding:8px 16px', 'border-radius:999px', 'cursor:pointer',
     'color:#c9a349', 'background:rgba(20,18,16,.85)', 'backdrop-filter:blur(6px)',
@@ -122,7 +122,7 @@ const overlayCss = `
 #tw-research-overlay .tw-stage p{display:none;margin:4px 0 0;font-size:13.5px;line-height:1.5;color:#a99f8c}
 #tw-research-overlay .tw-stage.active p{display:block}
 #tw-research-overlay .tw-note{margin:14px auto 0;max-width:480px;font-size:13px;line-height:1.55;color:#a99f8c}
-#tw-research-overlay .tw-back{position:fixed;top:16px;right:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
+#tw-research-overlay .tw-back{position:fixed;top:16px;left:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
 #tw-research-overlay .tw-back:hover{background:rgba(201,163,73,.12)}
 @media (max-height:780px){
   #tw-research-overlay .tw-770{width:min(190px,50vw)}
