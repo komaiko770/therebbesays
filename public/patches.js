@@ -81,7 +81,7 @@ function syncChipVisibility() {
 // Stage contract with the Fly worker (research_stage column):
 const STAGES = [
   ['analyzing',    'Analyzing your question',                  'Building Hebrew search queries and key terms from what you asked.'],
-  ['retrieving',   'Searching Toras Menachem & Igros Kodesh',  'Hybrid semantic + keyword retrieval across both source archives.'],
+  ['retrieving',   'Searching Toras Menachem (vols. 1–73) & Igros Kodesh (vols. 1–28)',  'Toras Menachem covers 1950–1973. Igros Kodesh covers letters from 1928–1973 in Hebrew and Yiddish.'],
   ['reflecting',   'Reading what was found',                   'Re-examining the retrieved passages and refining the research focus.'],
   ['verifying',    'Verifying every source',                   'Each passage faces adversarial verification votes before it may be cited.'],
   ['synthesizing', 'Writing the sourced answer',               'Composed strictly from verified passages — every claim cited.'],
