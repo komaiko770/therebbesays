@@ -1,7 +1,8 @@
 // Runtime refinements layered on top of app.js.
 // 1) Auth controls that are ALWAYS reachable — including on research/answer pages
-//    where the overlay covers the site header. The chip sits BOTTOM-right so it can
-//    never cover the answer modal's close button (owner report, 26 Jul).
+//    where the overlay covers the site header. The chip sits TOP-LEFT (owner request,
+//    26 Jul): it pairs with the Back-to-feed pill at top-right and never covers the
+//    answer modal's close button (which is top-right; the chip is on the other side).
 // 2) Bold, truthful research preloader: driven entirely by real backend state
 //    (status, research_stage, research_started_at). It never invents progress and
 //    never resets on reload — elapsed time and stage come from the database.
@@ -43,9 +44,10 @@ function ensureAuthChip() {
   const chip = document.createElement('button');
   chip.id = 'tw-auth-chip';
   chip.type = 'button';
-  // Bottom-right: keeps clear of the modal close button (top-right) on every page.
+  // Top-left (owner request, 26 Jul): mirrors the Back-to-feed pill at top-right,
+  // and stays clear of the answer modal's close button (top-right) on every page.
   chip.style.cssText = [
-    'position:fixed', 'bottom:16px', 'right:16px', 'z-index:4000', 'display:none',
+    'position:fixed', 'top:16px', 'left:16px', 'z-index:4000', 'display:none',
     'font:600 13px Inter,system-ui,sans-serif', 'letter-spacing:.02em',
     'padding:8px 16px', 'border-radius:999px', 'cursor:pointer',
     'color:#c9a349', 'background:rgba(20,18,16,.85)', 'backdrop-filter:blur(6px)',
@@ -115,7 +117,7 @@ const overlayCss = `
 #tw-research-overlay .tw-stage p{display:none;margin:4px 0 0;font-size:13.5px;line-height:1.5;color:#a99f8c}
 #tw-research-overlay .tw-stage.active p{display:block}
 #tw-research-overlay .tw-note{margin:14px auto 0;max-width:480px;font-size:13px;line-height:1.55;color:#a99f8c}
-#tw-research-overlay .tw-back{display:inline-block;margin:14px auto 0;color:#c9a349;font-size:14px;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 18px}
+#tw-research-overlay .tw-back{position:fixed;top:16px;right:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
 #tw-research-overlay .tw-back:hover{background:rgba(201,163,73,.12)}
 @media (max-height:780px){
   #tw-research-overlay .tw-770{width:min(215px,54vw)}
@@ -229,6 +231,7 @@ function renderOverlay(q) {
     return `<div class="tw-stage ${cls}"><h3>${title}</h3><p>${desc}</p></div>`;
   }).join('');
   overlay.innerHTML = `
+    <a class="tw-back" href="/">← Back to the feed</a>
     <div class="tw-wrap">
       <p class="tw-kicker">ב״ה</p>
       <h1>${queued ? 'In the research queue' : 'Research in progress'}</h1>
@@ -242,7 +245,6 @@ function renderOverlay(q) {
       <p class="tw-note">${queued
         ? 'Your question is saved and holds its place in line. Research begins automatically — nothing is lost if you leave.'
         : 'Live pipeline state, read directly from the research engine. You can safely leave — the finished answer will appear in the feed.'}</p>
-      <a class="tw-back" href="/">← Back to the feed</a>
     </div>`;
   if (elapsed) startElapsedTicker();
   syncChipVisibility();
