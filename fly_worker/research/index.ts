@@ -19,6 +19,13 @@
 //      up to 3 alternates from analyzeQuestion) instead of one, and every run records a
 //      `research_funnel` JSON on the questions row (retrieved -> genuine -> cited, plus
 //      the exact queries used) so coverage gaps are visible instead of silent.
+//   6. RETRIEVAL DEPTH + FUNNEL DETAIL (26 Jul, "Morocco" postmortem): the corpus held
+//      64 chunks literally mentioning Morocco (55 in Igrot Kodesh alone), but the
+//      per-collection cap of 30 structurally excluded at least 25 of them before any
+//      reviewer ever saw them. TOP_K_PER_COLLECTION raised 30 -> 60. The funnel now
+//      also records the pass-1 verdict breakdown and exactly which sources the
+//      adversarial vote refuted, so the next coverage complaint can be diagnosed from
+//      the database alone.
 //
 // The pipeline (analyzeQuestion -> hybridSearchPerCollection -> reflectOnCandidates ->
 // verify -> synthesize) is unchanged.
@@ -52,10 +59,11 @@ const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
 const adminHeaders = { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" };
 
-// Retrieval/verification tuning. TOP_K_PER_COLLECTION was 15 (the full_pipeline_test.py
-// default); raised to 30 after the "France" postmortem showed the corpus held ~250+
-// on-topic documents while the funnel could only ever consider 30 candidates total.
-const TOP_K_PER_COLLECTION = 30;
+// Retrieval/verification tuning. TOP_K_PER_COLLECTION history: 15 (full_pipeline_test.py
+// default) -> 30 ("France" postmortem: one embedding query fills every slot with a
+// single theme) -> 60 ("Morocco" postmortem: 55 literal-mention Igrot Kodesh chunks
+// existed but only 30 could ever be considered; the cap itself was the coverage floor).
+const TOP_K_PER_COLLECTION = 60;
 const N_ADVERSARIAL_VOTERS = 3;
 
 function response(body: unknown, status = 200) {
@@ -184,7 +192,8 @@ async function researchQuestion(question: Question) {
 
     // Funnel accounting — what was found vs. what survived vs. what got cited. Stored on
     // the question row so coverage problems are diagnosable instead of silent.
-    const refutedByVote = verified.verdicts.filter((v) => v.adversarial_check?.verdict === "REFUTED").length;
+    const refutedVerdicts = verified.verdicts.filter((v) => v.adversarial_check?.verdict === "REFUTED");
+    const refutedByVote = refutedVerdicts.length;
     const funnel = {
       top_k_per_collection: TOP_K_PER_COLLECTION,
       queries: {
@@ -197,8 +206,15 @@ async function researchQuestion(question: Question) {
         igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
         total: candidates.length,
       },
+      pass1_verdicts: {
+        genuine: genuineCandidates.length + refutedByVote,
+        tangential: verified.verdicts.filter((v) => v.verdict === "TANGENTIAL" && !v.adversarial_check).length,
+        false_positive: verified.verdicts.filter((v) => v.verdict === "FALSE_POSITIVE").length,
+        no_verdict: Math.max(0, candidates.length - verified.verdicts.length),
+      },
       genuine_pass1: genuineCandidates.length + refutedByVote,
       refuted_by_adversarial_vote: refutedByVote,
+      refuted_sources: refutedVerdicts.map((v) => v.source ?? "unknown"),
       genuine_final: genuineCandidates.length,
       cited: synthesis.citations.length,
     };
