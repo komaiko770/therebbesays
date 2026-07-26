@@ -1,30 +1,35 @@
-// Build-time asset sync — RETIRED for site code files.
+// Build-time patcher (runs as the Netlify build command).
 //
-// This script used to overwrite public/index.html, public/app.js, and
-// public/styles.css with copies from Supabase Storage at every Netlify build.
-// That silently reverted committed work: Git had the newest code (Feed rename,
-// feed-above-the-fold, auth fixes, new source pills), but every deploy shipped
-// the stale storage snapshot instead.
+// History: this file used to OVERWRITE public/index.html, app.js and styles.css with
+// snapshots from Supabase Storage — which silently reverted every committed change on
+// each deploy. That sync is permanently retired: Git is the single source of truth.
 //
-// Git is now the single source of truth for all site code. Images and other
-// binary assets are served directly from Supabase Storage via the /images/*
-// redirect in netlify.toml, so nothing needs to be downloaded at build time.
-//
-// If a binary file ever needs to ship inside the deploy itself, add it to the
-// list below — never add index.html, app.js, or styles.css back.
-import { writeFile } from "node:fs/promises";
+// Now it applies small deterministic flag patches to public/app.js that would otherwise
+// require rewriting the whole 60KB file for a one-line change. Every replacement MUST
+// match exactly once or the build fails loudly — no silent drift.
+import { readFile, writeFile } from "node:fs/promises";
 
-const BASE = "https://euixoavdzwaactdbxnpk.supabase.co/storage/v1/object/public/site-assets/site/";
-const files = []; // intentionally empty — site code deploys from Git
+const TARGET = new URL("../public/app.js", import.meta.url);
 
-for (const name of files) {
-  const res = await fetch(`${BASE}${name}?v=${Date.now()}`);
-  if (!res.ok) {
-    console.error(`sync failed for ${name}: HTTP ${res.status}`);
-    process.exit(1);
+const REPLACEMENTS = [
+  {
+    reason: "Enforce the client-side sign-in gate for starting new research (owner request, 26 Jul)",
+    from: "const AUTH_GATE_ENABLED = false;",
+    to: "const AUTH_GATE_ENABLED = true;",
+  },
+];
+
+let source = await readFile(TARGET, "utf8");
+for (const { reason, from, to } of REPLACEMENTS) {
+  const occurrences = source.split(from).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(
+      `apply-flags: expected exactly 1 occurrence of ${JSON.stringify(from)} in public/app.js, found ${occurrences}. ` +
+      `(${reason}) — refusing to build with silent drift.`,
+    );
   }
-  const buf = Buffer.from(await res.arrayBuffer());
-  await writeFile(new URL(`../public/${name}`, import.meta.url), buf);
-  console.log(`synced ${name} (${buf.length} bytes)`);
+  source = source.replace(from, to);
+  console.log(`patched app.js: ${reason}`);
 }
-console.log("sync-assets: site code deploys from Git; nothing to sync.");
+await writeFile(TARGET, source);
+console.log("apply-flags complete");
