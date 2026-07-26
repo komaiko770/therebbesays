@@ -169,7 +169,7 @@ async function researchQuestion(question: Question) {
     let retrievedByCollection: { toras_menachem: number; igrot_kodesh: number };
 
     if (citationParsed.is_citation_lookup) {
-      // Citation route: direct, precise lookup — no semantic/keyword search at all.
+      // Citation route: direct, precise lookup first.
       await setStage(question.id, "retrieving");
       candidates = await lookupCitationChunks(SUPABASE_URL, adminHeaders, citationParsed.normalized_key, TOP_K_PER_COLLECTION);
       topicGuidance =
@@ -179,6 +179,45 @@ async function researchQuestion(question: Question) {
         `the passage actually engages with or explains this source (not just a passing citation with no ` +
         `substantive discussion).`;
       funnelQueries = { citation_key: citationParsed.normalized_key };
+
+      // SEMANTIC FALLBACK (26 Jul, "Brachos daf 2" postmortem): the citation index
+      // only captures explicit numeric footnotes (e.g. "ברכות ב, א"). But famous
+      // passages are usually referenced by NAME — ריש ברכות, the opening mishnah
+      // "מאימתי", quoting the passage's first words — which the index never sees.
+      // Brachos 2a had just 2 index entries while daf 3a had 17; the corpus is NOT
+      // silent about the opening of Brachos. So when the index returns fewer than
+      // MIN_INDEX_HITS candidates, supplement with the normal semantic/keyword
+      // retrieval. Adversarial verification still gates every candidate, so this
+      // adds recall without weakening the citation standard.
+      const MIN_INDEX_HITS = 8;
+      if (candidates.length < MIN_INDEX_HITS) {
+        const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+        const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
+        const byCollection = await hybridSearchPerCollection(
+          SUPABASE_URL,
+          adminHeaders,
+          queryTexts,
+          analysis.keyword_terms,
+          TOP_K_PER_COLLECTION,
+        );
+        const seen = new Set(candidates.map((c) => `${c.collection}:${c.source_id}:${c.chunk_index}`));
+        const extra = Object.values(byCollection).flat()
+          .filter((c) => !seen.has(`${c.collection}:${c.source_id}:${c.chunk_index}`));
+        candidates = [...candidates, ...extra];
+        topicGuidance +=
+          ` NOTE: the citation index had very few entries for this exact reference, so additional` +
+          ` candidates were retrieved semantically. Such passages may engage this exact verse/daf by NAME` +
+          ` or by quoting its words (e.g. "ריש ברכות", the opening mishnah "מאימתי") without a numeric` +
+          ` citation — treat those as engaging this source. The same standard applies: GENUINE only if` +
+          ` the passage substantively discusses THIS specific verse/daf.`;
+        funnelQueries = {
+          citation_key: citationParsed.normalized_key,
+          citation_index_hits: seen.size,
+          fallback_hebrew_query: analysis.hebrew_query,
+          fallback_alt_queries: analysis.alt_queries ?? [],
+        };
+      }
+
       retrievedByCollection = {
         toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
         igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
