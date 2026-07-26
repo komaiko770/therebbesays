@@ -720,7 +720,18 @@ function renderKeywordFilters() {
   const counts = new Map();
   state.questions.forEach(item => keywordsFor(item).forEach(keyword => counts.set(keyword,(counts.get(keyword) || 0) + 1)));
   const keywords = [...counts].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0,10);
-  keywordFilterList.innerHTML = [`<button type="button" data-keyword="" class="${state.activeKeyword ? '' : 'active'}">All</button>`, ...keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`)].join('');
+  const buttons = [`<button type="button" data-keyword="" class="${state.activeKeyword ? '' : 'active'}">All</button>`, ...keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`)].join('');
+  // Stock-ticker filters (owner video, 26 Jul 15:14): the topic row scrolls by
+  // continuously. Content is doubled for a seamless loop; the clone is inert for
+  // keyboards and screen readers. Hovering pauses so clicking stays easy, and the
+  // whole thing stays a plain scrollable row for reduced-motion users (CSS).
+  const inertClone = buttons.replaceAll('<button type="button"', '<button type="button" tabindex="-1"');
+  const html = `<div class="ticker-track"><span class="ticker-set">${buttons}</span><span class="ticker-set" aria-hidden="true">${inertClone}</span></div>`;
+  // Feed data refreshes every 15s; only rewrite (and restart the animation) when
+  // the filter content actually changed, so the ticker never visibly jumps.
+  if (keywordFilterList.dataset.tickerHtml === html) return;
+  keywordFilterList.dataset.tickerHtml = html;
+  keywordFilterList.innerHTML = html;
 }
 
 function renderFeed() {
@@ -736,10 +747,10 @@ function renderFeed() {
     feedList.innerHTML = `<div class="empty">${state.feedView === 'hearted' ? 'You have not hearted any questions yet. Tap a heart to build your list.' : query ? 'No questions match that search yet.' : 'No questions yet. Ask the first one above.'}</div>`;
     return;
   }
-  // Card hierarchy (owner video, 26 Jul 15:04): title first, hashtags below it, no
-  // "Answer published" badge (the date already says it) and no "Read the complete
-  // sourced answer" link (the whole card is clickable). Status still shows for
-  // in-progress/failed cards, where it carries real information.
+  // Card hierarchy (owner videos, 26 Jul): title first, then the summary text, and
+  // the #hashtags BELOW the primary text — not above it. No "Answer published" badge
+  // (the date already says it) and no "Read the complete sourced answer" link (the
+  // whole card is clickable). Status still shows for in-progress/failed cards.
   feedList.innerHTML = questions.map((item,index) => {
     const hook = hookFor(item);
     const summary = item.status === 'published' ? (hook.tease || fallbackTeaser(item)) : statusCopy(item);
@@ -751,8 +762,8 @@ function renderFeed() {
       </a>
       <div class="card-main">
         <a class="question-title" href="/answer/${encodeURIComponent(item.slug)}">${escapeHtml(displayTopic(item.question))}</a>
-        <div class="card-top">${item.status === 'published' ? '' : `<span class="status ${item.status}">${label(item.status)}</span>`}<div class="instagram-keywords">${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div></div>
         <p class="card-summary">${escapeHtml(summary)}</p>
+        <div class="card-top">${item.status === 'published' ? '' : `<span class="status ${item.status}">${label(item.status)}</span>`}<div class="instagram-keywords">${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div></div>
       </div>
       <div class="card-side"><time datetime="${item.created_at}">${formatDate(item.created_at)}</time>${heartButton(item)}${adminDeleteButton(item,'card')}</div>
     </article>`;
