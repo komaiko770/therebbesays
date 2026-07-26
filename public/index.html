@@ -92,16 +92,21 @@
     .site-header .header-actions{grid-column:3;grid-row:1;justify-self:end;display:flex;align-items:center;gap:14px}
     .site-header .bh{grid-column:auto;grid-row:auto;justify-self:auto;font-size:17px}
     /* Answer tabs: Overview / Toras Menachem / Igros Kodesh (owner, 26 Jul).
-       Horizontally scrollable when tight; never widens the page. */
+       Horizontally scrollable when tight; never widens the page.
+       Selected collection tabs are SOLID pills with dark text (owner screenshot,
+       26 Jul): the earlier translucent selected background let the base rule's
+       near-black text sit on a dark pill — illegible. */
     .modal-answer-main{min-width:0;max-width:100%}
     .answer-tabs{display:flex;flex-wrap:nowrap;gap:8px;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
     .answer-tabs::-webkit-scrollbar{display:none}
     .answer-tabs button{flex:0 0 auto;white-space:nowrap}
     .answer-tabs button small{opacity:.65;font-size:.85em}
     .answer-tabs .tab-tm{border-color:rgba(201,163,73,.6);color:#e2bd7c}
-    .answer-tabs .tab-tm[aria-selected="true"]{background:rgba(201,163,73,.16)}
+    .answer-tabs .tab-tm[aria-selected="true"]{background:var(--gold);border-color:var(--gold);color:#241a0b}
+    .answer-tabs .tab-tm[aria-selected="true"] small{opacity:.8}
     .answer-tabs .tab-ik{border-color:rgba(206,206,216,.5);color:#d9d9e2}
-    .answer-tabs .tab-ik[aria-selected="true"]{background:rgba(206,206,216,.14);border-color:#d9d9e2}
+    .answer-tabs .tab-ik[aria-selected="true"]{background:#c6d0de;border-color:#c6d0de;color:#1c2430}
+    .answer-tabs .tab-ik[aria-selected="true"] small{opacity:.8}
     .source-directory{margin-top:22px}
     @media (max-width:640px) {
       .header-actions { gap:6px; }
