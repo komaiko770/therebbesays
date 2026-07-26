@@ -405,3 +405,46 @@ if (feedList) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
+
+// --- 5) Pasuk questions: say "pasuk", not "topic" ------------------------------
+// Owner (26 Jul, evening): when the question is a specific verse (e.g. "Genesis
+// 1:1", "Bereishis 6:4"), the source-brief headings "What the Rebbe says about
+// this topic" / "How prominent the topic is" should say "pasuk" instead of
+// "topic". The brief text is baked into the answer markdown by the worker, so
+// this swaps the word at render time on answer pages whose question contains a
+// chapter:verse reference. Guarded so the observer can't loop (once swapped,
+// the text no longer matches).
+(function pasukWording() {
+  const PASUK_RE = /\b\d+\s*:\s*\d+\b/;
+
+  function questionIsPasuk() {
+    const detail = document.querySelector('#detail');
+    if (!detail) return false;
+    const text = `${detail.getAttribute('aria-label') || ''} ${detail.querySelector('h1, h2, .detail-title')?.textContent || ''} ${document.title || ''}`;
+    return PASUK_RE.test(text);
+  }
+
+  function swap() {
+    if (!/^\/answer\//.test(location.pathname)) return;
+    if (!questionIsPasuk()) return;
+    const detail = document.querySelector('#detail');
+    if (!detail) return;
+    detail.querySelectorAll('h3, h4, h5, h6, strong, b, dt, span, p, small').forEach((el) => {
+      // Only touch elements whose own text IS one of the known headings —
+      // never body copy.
+      if (el.children.length > 0) return;
+      const t = (el.textContent || '').trim();
+      if (/^what the rebbe says about this topic:?$/i.test(t)) {
+        el.textContent = t.replace(/topic/i, 'pasuk');
+      } else if (/^how prominent the topic is:?$/i.test(t)) {
+        el.textContent = t.replace(/the topic/i, 'the pasuk');
+      }
+    });
+  }
+
+  const detail = document.querySelector('#detail');
+  if (detail) {
+    new MutationObserver(swap).observe(detail, { childList: true, subtree: true });
+    swap();
+  }
+})();
