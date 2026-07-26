@@ -612,3 +612,35 @@ if (feedList) {
     ensureTab();
   }
 })();
+
+// --- 7) Feed above the fold: reveal near-viewport cards immediately -----------
+// Owner (26 Jul, 19:18): the second feed card stayed invisible until you
+// scrolled well past it, so the feed's first impression was one card and empty
+// space. Cause: app.js's reveal observer only fires once a card is 12% inside
+// a viewport that is itself shrunk 7% at the bottom — a card straddling the
+// fold never qualifies. After every feed render (and on scroll, as a belt),
+// any card whose top edge is within the viewport plus a 200px grace band is
+// revealed immediately with no stagger delay; genuinely below-screen cards
+// keep the scroll-in animation.
+(function revealAboveFold() {
+  function revealNearViewport() {
+    document.querySelectorAll('#feed-list .reveal-item:not(.is-visible)').forEach((el) => {
+      if (el.getBoundingClientRect().top < innerHeight + 200) {
+        el.style.transitionDelay = '0ms';
+        el.classList.add('is-visible');
+      }
+    });
+  }
+  function afterRender() {
+    // app.js adds .reveal-item inside a requestAnimationFrame after the feed's
+    // innerHTML changes — run after that frame (and once more shortly after,
+    // for slow layouts) so the classes exist before we check positions.
+    requestAnimationFrame(() => requestAnimationFrame(revealNearViewport));
+    setTimeout(revealNearViewport, 120);
+  }
+  const list = document.querySelector('#feed-list');
+  if (list) new MutationObserver(afterRender).observe(list, { childList: true });
+  window.addEventListener('scroll', revealNearViewport, { passive: true });
+  window.addEventListener('resize', revealNearViewport, { passive: true });
+  afterRender();
+})();
