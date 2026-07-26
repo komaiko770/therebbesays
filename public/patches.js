@@ -1,8 +1,10 @@
 // Runtime refinements layered on top of app.js.
-// 1) Auth controls that are ALWAYS reachable — including on research/answer pages
-//    where the overlay covers the site header. The chip sits TOP-LEFT (owner request,
-//    26 Jul): it pairs with the Back-to-feed pill at top-right and never covers the
-//    answer modal's close button (which is top-right; the chip is on the other side).
+// 1) Auth controls that are ALWAYS reachable — including on research pages
+//    where the full-screen preloader covers the site header. The chip sits
+//    TOP-LEFT and pairs with the Back-to-feed pill at top-right. Owner request
+//    (26 Jul PM): the chip must NOT appear on the article/answer modal — the
+//    feed header's sign-out is enough there. It only shows while the research
+//    preloader overlay is up (no other auth control is reachable then).
 // 2) Bold, truthful research preloader: driven entirely by real backend state
 //    (status, research_stage, research_started_at). It never invents progress and
 //    never resets on reload — elapsed time and stage come from the database.
@@ -21,7 +23,7 @@ const SUPABASE_KEY = 'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu';
 
 let currentSession = null;
 
-// --- 1) Auth: header failsafe + floating chip for overlay pages -------------
+// --- 1) Auth: header failsafe + floating chip for the research preloader ----
 function applyAuthVisibility() {
   const slot = document.querySelector('#auth-slot');
   const signedIn = Boolean(currentSession);
@@ -44,8 +46,8 @@ function ensureAuthChip() {
   const chip = document.createElement('button');
   chip.id = 'tw-auth-chip';
   chip.type = 'button';
-  // Top-left (owner request, 26 Jul): mirrors the Back-to-feed pill at top-right,
-  // and stays clear of the answer modal's close button (top-right) on every page.
+  // Top-left: mirrors the Back-to-feed pill at top-right on the preloader and
+  // stays clear of its close/back control.
   chip.style.cssText = [
     'position:fixed', 'top:16px', 'left:16px', 'z-index:4000', 'display:none',
     'font:600 13px Inter,system-ui,sans-serif', 'letter-spacing:.02em',
@@ -63,8 +65,10 @@ function ensureAuthChip() {
 function syncChipVisibility() {
   const chip = document.querySelector('#tw-auth-chip');
   if (!chip) return;
-  const detail = document.querySelector('#detail');
-  const overlayOpen = (detail && !detail.hidden) || document.querySelector('#tw-research-overlay');
+  // Owner request (26 Jul PM): never show the chip on the article/answer modal —
+  // the feed header's sign-out is enough. Only the full-screen research
+  // preloader (which hides every other auth control) gets the chip.
+  const overlayOpen = Boolean(document.querySelector('#tw-research-overlay'));
   chip.style.display = overlayOpen ? 'inline-block' : 'none';
 }
 
