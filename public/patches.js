@@ -296,6 +296,38 @@ function stopPolling() {
   pollSlug = null;
 }
 
+// --- Kill the legacy-loader flash (owner video, 26 Jul 16:16) -----------------
+// app.js renders its old in-modal "Research in progress" card synchronously the
+// moment an in-progress card is clicked; the full-screen preloader used to appear
+// only after the first status fetch returned (~0.5s later — and instantly when
+// cached, which is why the flash came and went). A MutationObserver raises the
+// full-screen overlay in the SAME frame the legacy loader mounts, seeded from the
+// data already on the page; the first poll then swaps in the true backend state.
+const detailNode = document.querySelector('#detail');
+if (detailNode) {
+  const preemptLegacyLoader = () => {
+    if (!detailNode.querySelector('.research-loader')) return;
+    if (!document.querySelector('#tw-research-overlay')) {
+      const slug = location.pathname.match(/^\/answer\/([^/]+)/)?.[1];
+      if (!slug) return;
+      const topic = (detailNode.getAttribute('aria-label') || '')
+        .replace(/^What does the Rebbe say about\s*/i, '')
+        .replace(/\?+\s*$/, '')
+        .trim();
+      renderOverlay({
+        slug: decodeURIComponent(slug),
+        question: topic || '…',
+        status: 'researching',
+        research_stage: null,
+        research_started_at: null,
+      });
+    }
+    pollResearch();
+  };
+  new MutationObserver(preemptLegacyLoader).observe(detailNode, { childList: true, subtree: true });
+  preemptLegacyLoader();
+}
+
 // Watch for navigation into an answer route (SPA pushState or full load).
 ensureAuthChip();
 pollResearch();
