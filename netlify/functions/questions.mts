@@ -165,16 +165,22 @@ export default async (req: Request, _context: Context) => {
         return json({ question: existing[0], existing: true, research });
       }
 
+      // Forward-only attribution (owner request, 26 Jul): record who asked every new
+      // question — signed-in user id + email when a session is present (checked even
+      // when the gate is off), otherwise the anonymous visitor id from the browser.
+      const visitorHeader = req.headers.get("x-visitor-id") || "";
+      const askedVisitorId = /^[A-Za-z0-9_-]{16,80}$/.test(visitorHeader) ? visitorHeader : null;
+      const user = await verifyUser(url, edgeJwt, req);
+
       // Creating a brand-new research question requires a signed-in user.
-      if (AUTH_GATE_ENABLED) {
-        const user = await verifyUser(url, edgeJwt, req);
-        if (!user) return json({ error: "Please sign in to start new research." }, 401);
+      if (AUTH_GATE_ENABLED && !user) {
+        return json({ error: "Please sign in to start new research." }, 401);
       }
 
       const response = await fetch(`${url}/rest/v1/questions?select=id,slug,question,status,created_at`, {
         method: "POST",
         headers: headers(key, "return=representation"),
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, asked_by: user?.id ?? null, asked_by_email: user?.email ?? null, visitor_id: askedVisitorId }),
       });
       const data = await response.json();
       if (!response.ok) {
