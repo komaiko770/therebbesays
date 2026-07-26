@@ -5,13 +5,14 @@
 //    (status, research_stage, research_started_at). It never invents progress and
 //    never resets on reload — elapsed time and stage come from the database.
 // 3) Topic filter: honest empty state instead of "No questions yet."
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+//
+// IMPORTANT: this file must NOT create its own Supabase client. Running two
+// GoTrueClient instances against the same storage key caused auth to wedge
+// (getSession never resolved: no sign-in UI, OAuth/magic-link sessions dropped).
+// It reuses the single client that app.js exposes on window.__twSupabase.
 
-const supabase = createClient(
-  'https://euixoavdzwaactdbxnpk.supabase.co',
-  'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu',
-  { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } }
-);
+const SUPABASE_URL = 'https://euixoavdzwaactdbxnpk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu';
 
 let currentSession = null;
 
@@ -60,8 +61,16 @@ function syncChipVisibility() {
   chip.style.display = overlayOpen ? 'inline-block' : 'none';
 }
 
-supabase.auth.getSession().then(({ data }) => { currentSession = data.session; applyAuthVisibility(); });
-supabase.auth.onAuthStateChange((_event, session) => { currentSession = session; applyAuthVisibility(); });
+// Reuse the shared auth client from app.js (retry briefly in case app.js is still loading).
+(function wireSharedAuth(attempt = 0) {
+  const sb = window.__twSupabase;
+  if (!sb) {
+    if (attempt < 40) setTimeout(() => wireSharedAuth(attempt + 1), 250);
+    return;
+  }
+  sb.auth.getSession().then(({ data }) => { currentSession = data.session; applyAuthVisibility(); }).catch(() => {});
+  sb.auth.onAuthStateChange((_event, session) => { currentSession = session; applyAuthVisibility(); });
+})();
 
 // --- 2) Truthful research preloader -----------------------------------------
 // Stage contract with the Fly worker (research_stage column):
@@ -157,9 +166,9 @@ function removeOverlay() {
 }
 
 async function fetchQuestion(slug) {
-  const url = 'https://euixoavdzwaactdbxnpk.supabase.co/rest/v1/questions'
+  const url = `${SUPABASE_URL}/rest/v1/questions`
     + `?select=slug,question,status,research_stage,research_started_at&slug=eq.${encodeURIComponent(slug)}&limit=1`;
-  const res = await fetch(url, { headers: { apikey: supabase.supabaseKey, authorization: `Bearer ${supabase.supabaseKey}` } });
+  const res = await fetch(url, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}` } });
   const rows = res.ok ? await res.json() : [];
   return rows[0] || null;
 }
