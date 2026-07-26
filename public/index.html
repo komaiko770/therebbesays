@@ -86,8 +86,12 @@
        zoom/pan loop plays full-bleed behind the hero. Muted + playsinline +
        loop so it autoplays everywhere (including iOS). A dark scrim keeps the
        headline, kicker, and search input readable over the motion — the video
-       itself protects a center pocket, the scrim protects the edges. */
-    .hero { position:relative; overflow:hidden; }
+       itself protects a center pocket, the scrim protects the edges.
+       NO overflow:hidden here (owner screenshot, 26 Jul 19:19): it clipped the
+       autocomplete dropdown that hangs below the search input. The video is
+       pinned to the hero's box with inset:0 + object-fit:cover, so it cannot
+       overflow anyway. */
+    .hero { position:relative; }
     .hero .hero-bg {
       position:absolute; inset:0; width:100%; height:100%;
       object-fit:cover; object-position:center;
