@@ -1,10 +1,11 @@
 // Runtime refinements layered on top of app.js.
 // 1) Auth controls that are ALWAYS reachable — including on research pages
-//    where the full-screen preloader covers the site header. The chip sits
-//    TOP-LEFT and pairs with the Back-to-feed pill at top-right. Owner request
+//    where the full-screen preloader covers the site header. Owner request
 //    (26 Jul PM): the chip must NOT appear on the article/answer modal — the
 //    feed header's sign-out is enough there. It only shows while the research
 //    preloader overlay is up (no other auth control is reachable then).
+//    (26 Jul, evening) Owner: swap positions — sign-out chip now TOP-RIGHT,
+//    Back-to-feed pill TOP-LEFT.
 // 2) Bold, truthful research preloader: driven entirely by real backend state
 //    (status, research_stage, research_started_at). It never invents progress and
 //    never resets on reload — elapsed time and stage come from the database.
@@ -46,10 +47,10 @@ function ensureAuthChip() {
   const chip = document.createElement('button');
   chip.id = 'tw-auth-chip';
   chip.type = 'button';
-  // Top-left: mirrors the Back-to-feed pill at top-right on the preloader and
-  // stays clear of its close/back control.
+  // Top-right (owner swap, 26 Jul evening): mirrors the Back-to-feed pill,
+  // which now sits top-left on the preloader.
   chip.style.cssText = [
-    'position:fixed', 'top:16px', 'left:16px', 'z-index:4000', 'display:none',
+    'position:fixed', 'top:16px', 'right:16px', 'z-index:4000', 'display:none',
     'font:600 13px Inter,system-ui,sans-serif', 'letter-spacing:.02em',
     'padding:8px 16px', 'border-radius:999px', 'cursor:pointer',
     'color:#c9a349', 'background:rgba(20,18,16,.85)', 'backdrop-filter:blur(6px)',
@@ -121,7 +122,7 @@ const overlayCss = `
 #tw-research-overlay .tw-stage p{display:none;margin:4px 0 0;font-size:13.5px;line-height:1.5;color:#a99f8c}
 #tw-research-overlay .tw-stage.active p{display:block}
 #tw-research-overlay .tw-note{margin:14px auto 0;max-width:480px;font-size:13px;line-height:1.55;color:#a99f8c}
-#tw-research-overlay .tw-back{position:fixed;top:16px;right:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
+#tw-research-overlay .tw-back{position:fixed;top:16px;left:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
 #tw-research-overlay .tw-back:hover{background:rgba(201,163,73,.12)}
 @media (max-height:780px){
   #tw-research-overlay .tw-770{width:min(190px,50vw)}
@@ -446,5 +447,168 @@ if (feedList) {
   if (detail) {
     new MutationObserver(swap).observe(detail, { childList: true, subtree: true });
     swap();
+  }
+})();
+
+// --- 6) Research trail tab ------------------------------------------------------
+// Owner (26 Jul, evening): published answers should expose the research trail —
+// which search terms were used, how many candidates were retrieved from each
+// work, and how many were rejected at verification (and why, where recorded) —
+// so readers can judge how thorough the search was. All of it comes from the
+// research_funnel JSON the worker already persists per question; nothing is
+// invented client-side. Questions researched before funnel logging existed
+// simply don't get the tab.
+(function researchTrail() {
+  const css = `
+#tw-trail-panel{margin:18px 0 8px;text-align:left;font-family:Inter,system-ui,sans-serif}
+#tw-trail-panel .tw-trail-section{margin:0 0 18px}
+#tw-trail-panel h3{font:600 12px Inter,system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#c9a349;margin:0 0 8px}
+#tw-trail-panel .tw-trail-card{border:1px solid rgba(201,163,73,.25);border-radius:12px;padding:14px 16px;background:rgba(201,163,73,.05)}
+#tw-trail-panel dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+#tw-trail-panel dt{font-size:13px;opacity:.65;white-space:nowrap}
+#tw-trail-panel dd{margin:0;font-size:13.5px}
+#tw-trail-panel dd[dir="rtl"]{font-family:Fraunces,Georgia,serif;font-size:15px}
+#tw-trail-panel .tw-trail-note{font-size:12.5px;line-height:1.55;opacity:.6;margin:10px 0 0}
+#tw-trail-panel .tw-trail-badge{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;padding:2px 9px;border-radius:999px;border:1px solid rgba(201,163,73,.4);color:#c9a349;margin-left:8px;vertical-align:1px}
+#tw-trail-panel ul{margin:6px 0 0;padding-left:18px;font-size:13.5px}
+#tw-trail-panel li{margin:3px 0}
+`;
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const HEB = /[\u0590-\u05FF]/;
+  const term = (label, value) => value
+    ? `<dt>${esc(label)}</dt><dd ${HEB.test(String(value)) ? 'dir="rtl"' : ''}>${esc(value)}</dd>` : '';
+
+  let funnelCache = { slug: null, data: null };
+
+  async function fetchFunnel(slug) {
+    if (funnelCache.slug === slug) return funnelCache.data;
+    const url = `${SUPABASE_URL}/rest/v1/questions`
+      + `?select=slug,research_funnel,source_count&slug=eq.${encodeURIComponent(slug)}&limit=1`;
+    const res = await fetch(url, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}` } });
+    const rows = res.ok ? await res.json() : [];
+    funnelCache = { slug, data: rows[0] || null };
+    return funnelCache.data;
+  }
+
+  function buildPanel(row) {
+    const f = row?.research_funnel;
+    if (!f || typeof f !== 'object') return null;
+    const q = f.queries || {};
+    const r = f.retrieved || {};
+    const v = f.pass1_verdicts || {};
+    const isCitation = f.route === 'citation';
+
+    const terms = [
+      term('Reference looked up', q.citation_key),
+      term('Primary Hebrew query', q.hebrew_query),
+      ...(Array.isArray(q.alt_queries) ? q.alt_queries.map((t, i) => term(`Alternate query ${i + 1}`, t)) : []),
+      term('Fallback Hebrew query', q.fallback_hebrew_query),
+      ...(Array.isArray(q.fallback_alt_queries) ? q.fallback_alt_queries.map((t, i) => term(`Fallback alternate ${i + 1}`, t)) : []),
+    ].filter(Boolean).join('');
+
+    const rejectedTotal = (v.tangential || 0) + (v.false_positive || 0) + (f.refuted_by_adversarial_vote || 0);
+    const refuted = Array.isArray(f.refuted_sources) && f.refuted_sources.length
+      ? `<ul>${f.refuted_sources.map((s) => `<li>${esc(typeof s === 'string' ? s : `${s.title || s.source || ''}${s.reason ? ` — ${s.reason}` : ''}`)}</li>`).join('')}</ul>`
+      : '';
+
+    const panel = document.createElement('div');
+    panel.id = 'tw-trail-panel';
+    panel.innerHTML = `
+      <div class="tw-trail-section">
+        <h3>How this was researched${isCitation ? '<span class="tw-trail-badge">CITATION LOOKUP</span>' : '<span class="tw-trail-badge">TOPICAL SEARCH</span>'}</h3>
+        <div class="tw-trail-card">
+          <dl>${terms || '<dt>Search terms</dt><dd>Not recorded for this question.</dd>'}</dl>
+          ${isCitation ? '<p class="tw-trail-note">Citation questions first pull every passage in the corpus index that explicitly cites this reference. When the index is sparse, a semantic search supplements it, so by-name references (e.g. quoting the passage’s opening words) are found too.</p>' : ''}
+        </div>
+      </div>
+      <div class="tw-trail-section">
+        <h3>Candidates retrieved</h3>
+        <div class="tw-trail-card">
+          <dl>
+            <dt>Total passages retrieved</dt><dd>${esc(r.total ?? '—')}</dd>
+            <dt>From Toras Menachem</dt><dd>${esc(r.toras_menachem ?? '—')}</dd>
+            <dt>From Igros Kodesh</dt><dd>${esc(r.igrot_kodesh ?? '—')}</dd>
+            ${f.top_k_per_collection ? `<dt>Search depth</dt><dd>top ${esc(f.top_k_per_collection)} per work</dd>` : ''}
+          </dl>
+        </div>
+      </div>
+      <div class="tw-trail-section">
+        <h3>Adversarial verification</h3>
+        <div class="tw-trail-card">
+          <dl>
+            <dt>Verified as genuine</dt><dd>${esc(f.genuine_final ?? v.genuine ?? '—')}</dd>
+            <dt>Rejected</dt><dd>${rejectedTotal}</dd>
+            ${v.false_positive != null ? `<dt>&nbsp;&nbsp;· false match</dt><dd>${esc(v.false_positive)} — retrieved but not genuinely about this question</dd>` : ''}
+            ${v.tangential != null ? `<dt>&nbsp;&nbsp;· passing mention</dt><dd>${esc(v.tangential)} — touches the theme without engaging it</dd>` : ''}
+            ${f.refuted_by_adversarial_vote != null ? `<dt>&nbsp;&nbsp;· refuted on review</dt><dd>${esc(f.refuted_by_adversarial_vote)} — struck down by the adversarial vote</dd>` : ''}
+            <dt>Cited in the answer</dt><dd>${esc(f.cited ?? row.source_count ?? '—')}</dd>
+          </dl>
+          ${refuted}
+          <p class="tw-trail-note">Every retrieved passage faces adversarial verification before it may be cited — a passage must substantively engage the question, not merely mention its words. Rejections are a sign of strictness, not missed material.</p>
+        </div>
+      </div>`;
+    return panel;
+  }
+
+  let restoreList = [];
+
+  function openTrail(bar, tabs, btn, panel) {
+    // Hide the native tab panels (everything after the tab bar inside its
+    // container) and show ours; native tab clicks restore them.
+    restoreList = [];
+    let node = bar.nextElementSibling;
+    while (node) {
+      if (node.id !== 'tw-trail-panel' && node.style.display !== 'none') {
+        restoreList.push([node, node.style.display]);
+        node.style.display = 'none';
+      }
+      node = node.nextElementSibling;
+    }
+    if (!panel.isConnected) bar.insertAdjacentElement('afterend', panel);
+    panel.style.display = '';
+    tabs.forEach((t) => t.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function closeTrail(btn) {
+    document.querySelector('#tw-trail-panel')?.remove();
+    restoreList.forEach(([node, display]) => { node.style.display = display; });
+    restoreList = [];
+    btn?.classList.remove('active');
+  }
+
+  async function ensureTab() {
+    if (!/^\/answer\//.test(location.pathname)) return;
+    const detail = document.querySelector('#detail');
+    if (!detail) return;
+    if (detail.querySelector('.tw-trail-tab')) return;
+    const tabs = Array.from(detail.querySelectorAll('button'))
+      .filter((b) => /^(synthesis|source[- ]by[- ]source|overview)$/i.test((b.textContent || '').trim()));
+    if (tabs.length < 2) return;
+    const slug = decodeURIComponent(location.pathname.match(/^\/answer\/([^/]+)/)?.[1] || '');
+    const row = await fetchFunnel(slug).catch(() => null);
+    const panel = row ? buildPanel(row) : null;
+    if (!panel) return; // no funnel recorded (pre-logging question) — no tab.
+    if (detail.querySelector('.tw-trail-tab')) return; // re-check after await
+    const bar = tabs[0].parentElement;
+    const btn = tabs[0].cloneNode(false);
+    btn.className = tabs[0].className;
+    btn.classList.remove('active');
+    btn.classList.add('tw-trail-tab');
+    btn.type = 'button';
+    btn.textContent = 'Research trail';
+    bar.appendChild(btn);
+    btn.addEventListener('click', () => openTrail(bar, tabs, btn, panel));
+    tabs.forEach((t) => t.addEventListener('click', () => closeTrail(btn)));
+  }
+
+  const detail = document.querySelector('#detail');
+  if (detail) {
+    new MutationObserver(() => { ensureTab(); }).observe(detail, { childList: true, subtree: true });
+    ensureTab();
   }
 })();
