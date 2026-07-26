@@ -81,3 +81,8 @@ footer{margin-top:22px;padding:27px;border-top:1px solid var(--line);text-align:
 @keyframes filter-ticker{to{transform:translateX(-50%)}}
 @media(prefers-reduced-motion:reduce){.ticker-track{animation:none}.keyword-filter>div{overflow-x:auto}}
 @media(max-width:760px){.feed-toolbar{display:none}}
+
+/* Source-count badge (owner video, 26 Jul 15:19): the total number of verified
+   sources backing an answer is the product's proof — show it on every published
+   feed card and in the answer header meta. */
+.card-sources{color:var(--gold);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
