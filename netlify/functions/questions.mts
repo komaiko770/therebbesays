@@ -6,9 +6,11 @@ const json = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 
-// Feature flag: when false, new-research submission is open (no sign-in required).
-// Flip to true once Supabase Auth is configured to enforce the sign-in gate.
-const AUTH_GATE_ENABLED = false;
+// Sign-in gate for STARTING NEW research (owner request, 26 Jul): creating a brand-new
+// question requires a signed-in Supabase user. Re-triggering research for an EXISTING
+// queued/failed question stays open — the queue sweeper depends on it and it creates no
+// new content. Override with env AUTH_GATE_ENABLED=false only for emergencies.
+const AUTH_GATE_ENABLED = (Netlify.env.get("AUTH_GATE_ENABLED") ?? process.env.AUTH_GATE_ENABLED ?? "true") !== "false";
 
 function getConfig() {
   const url = Netlify.env.get("SUPABASE_URL") || process.env.SUPABASE_URL || "https://euixoavdzwaactdbxnpk.supabase.co";
@@ -81,7 +83,7 @@ export default async (req: Request, _context: Context) => {
       const visitorId = req.headers.get("x-visitor-id") || "";
       const limit = Math.min(Math.max(Number(requestUrl.searchParams.get("limit")) || 40, 1), 100);
       const params = new URLSearchParams({
-        select: "id,slug,question,status,answer_markdown,short_answer,keywords,confidence,source_count,image_url,image_status,image_generated_at,created_at,updated_at,completed_at,sources(id,ordinal,title,url,publisher,host_publisher,original_source_title,original_source_detail,citation_label,supporting_excerpt,source_type,verified_at)",
+        select: "id,slug,question,status,answer_markdown,short_answer,keywords,confidence,source_count,image_url,image_status,image_generated_at,created_at,updated_at,completed_at,research_stage,research_started_at,sources(id,ordinal,title,url,publisher,host_publisher,original_source_title,original_source_detail,citation_label,supporting_excerpt,source_type,verified_at)",
         order: "created_at.desc",
         limit: String(limit),
       });
@@ -130,12 +132,6 @@ export default async (req: Request, _context: Context) => {
         return json(Array.isArray(reactionRows) ? reactionRows[0] : reactionRows);
       }
 
-      // Creating a new research question requires a signed-in user when the gate is enabled.
-      if (AUTH_GATE_ENABLED) {
-        const user = await verifyUser(url, edgeJwt, req);
-        if (!user) return json({ error: "Please sign in to start new research." }, 401);
-      }
-
       const question = typeof payload?.question === "string" ? payload.question.trim().replace(/\s+/g, " ") : "";
       if (question.length < 2 || question.length > 500) {
         return json({ error: "Please enter a topic or question between 2 and 500 characters." }, 400);
@@ -150,10 +146,18 @@ export default async (req: Request, _context: Context) => {
       const existingResponse = await fetch(`${url}/rest/v1/questions?${lookup}`, { headers: headers(key) });
       const existing = await existingResponse.json();
       if (Array.isArray(existing) && existing.length) {
+        // Existing question: no auth needed — this only re-triggers stalled research
+        // (the queue sweeper relies on this path) and creates nothing new.
         const research = ["queued", "failed"].includes(existing[0].status)
           ? await triggerResearch(existing[0].id)
           : null;
         return json({ question: existing[0], existing: true, research });
+      }
+
+      // Creating a brand-new research question requires a signed-in user.
+      if (AUTH_GATE_ENABLED) {
+        const user = await verifyUser(url, edgeJwt, req);
+        if (!user) return json({ error: "Please sign in to start new research." }, 401);
       }
 
       const response = await fetch(`${url}/rest/v1/questions?select=id,slug,question,status,created_at`, {
