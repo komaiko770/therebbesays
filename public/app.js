@@ -47,7 +47,8 @@ let searchDocked = false;
 let searchPlaceholder;
 const teaserTrack = document.querySelector('#teaser-track');
 const routeSlug = () => location.pathname.match(/^\/answer\/([^/]+)/)?.[1];
-state.activeKeyword = new URLSearchParams(location.search).get('keyword') || '';
+// The topic filter is intentionally NOT restored from the URL (owner, 26 Jul 18:41):
+// a reload always starts fresh on "All".
 const visitorId = (() => {
   const key = 'rebbe-heart-visitor';
   const existing = localStorage.getItem(key);
@@ -720,13 +721,19 @@ function renderKeywordFilters() {
   const counts = new Map();
   state.questions.forEach(item => keywordsFor(item).forEach(keyword => counts.set(keyword,(counts.get(keyword) || 0) + 1)));
   const keywords = [...counts].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0,10);
-  const buttons = [`<button type="button" data-keyword="" class="${state.activeKeyword ? '' : 'active'}">All</button>`, ...keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`)].join('');
-  // Stock-ticker filters (owner video, 26 Jul 15:14): the topic row scrolls by
-  // continuously. Content is doubled for a seamless loop; the clone is inert for
-  // keyboards and screen readers. Hovering pauses so clicking stays easy, and the
-  // whole thing stays a plain scrollable row for reduced-motion users (CSS).
-  const inertClone = buttons.replaceAll('<button type="button"', '<button type="button" tabindex="-1"');
-  const html = `<div class="ticker-track"><span class="ticker-set">${buttons}</span><span class="ticker-set" aria-hidden="true">${inertClone}</span></div>`;
+  const chips = keywords.map(([keyword,count]) => `<button type="button" data-keyword="${escapeHtml(keyword)}" class="${state.activeKeyword === keyword ? 'active' : ''}">${escapeHtml(displayKeyword(keyword))} <small>${count}</small></button>`).join('');
+  // Filter UX (owner, 26 Jul 18:41):
+  // 1) "All" is pinned OUTSIDE the scrolling track — always visible on the left,
+  //    so escaping a filter never depends on the ticker's position.
+  // 2) While a filter is active the ticker STOPS: the chips render as a static,
+  //    swipeable row (no clone, no animation) so the active chip stays findable.
+  // 3) Nothing is persisted to the URL — a reload always starts on "All".
+  const allButton = `<button type="button" data-keyword="" class="filter-all ${state.activeKeyword ? '' : 'active'}">All</button>`;
+  const inertClone = chips.replaceAll('<button type="button"', '<button type="button" tabindex="-1"');
+  const track = state.activeKeyword
+    ? `<div class="ticker-track is-static">${chips}</div>`
+    : `<div class="ticker-track"><span class="ticker-set">${chips}</span><span class="ticker-set" aria-hidden="true">${inertClone}</span></div>`;
+  const html = `${allButton}<div class="ticker-viewport">${track}</div>`;
   // Feed data refreshes every 15s; only rewrite (and restart the animation) when
   // the filter content actually changed, so the ticker never visibly jumps.
   if (keywordFilterList.dataset.tickerHtml === html) return;
@@ -933,7 +940,7 @@ function closeQuestion(updateHistory = true) {
   resetPageMeta();
   if (updateHistory) {
     if (history.state?.answer) history.back();
-    else history.replaceState({},'',`/${state.activeKeyword ? `?keyword=${encodeURIComponent(state.activeKeyword)}` : ''}`);
+    else history.replaceState({},'','/');
   }
   modalReturnFocus?.focus?.({ preventScroll:true });
   modalReturnFocus = null;
@@ -1016,13 +1023,12 @@ feedList.addEventListener('click', event => {
   const card = event.target.closest('[data-slug]');
   if (card && !event.target.closest('a,button')) openQuestion(card.dataset.slug);
 });
+// Filter clicks update in-page state only — never the URL (owner, 26 Jul 18:41):
+// persisting ?keyword= meant a reload silently kept the old filter.
 keywordFilterList?.addEventListener('click', event => {
   const keyword = event.target.closest('[data-keyword]');
   if (!keyword) return;
   state.activeKeyword = keyword.dataset.keyword || '';
-  const url = new URL(location.href);
-  if (state.activeKeyword) url.searchParams.set('keyword',state.activeKeyword); else url.searchParams.delete('keyword');
-  history.replaceState({},'',url);
   renderFeed();
 });
 
@@ -1085,7 +1091,7 @@ document.addEventListener('click', async event => {
     input.value = '';
     charCount.textContent = '0';
     closeQuestion(false);
-    history.pushState({},'',`/?keyword=${encodeURIComponent(state.activeKeyword)}`);
+    history.pushState({},'','/');
     renderFeed();
     document.getElementById('feed')?.scrollIntoView({ behavior:'smooth', block:'start' });
     return;

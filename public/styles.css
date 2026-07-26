@@ -64,22 +64,28 @@ footer{margin-top:22px;padding:27px;border-top:1px solid var(--line);text-align:
 .modal-topic-rail .topic-rail-block button.keyword-pill:hover{color:var(--gold);border:0}
 @media(max-width:760px){.modal-topic-rail .topic-rail-block button.keyword-pill{padding:0;border:0}}
 
-/* Ticker filters + relocated Sort (owner video, 26 Jul 15:14):
+/* Ticker filters + relocated Sort (owner video, 26 Jul 15:14; refined 26 Jul evening):
    the topic row scrolls continuously like a stock ticker (paused on hover so it
-   stays clickable), and Sort lives on its own right-aligned row above it — it was
-   getting lost among the filters. Tags on cards now sit BELOW the summary text
-   (.card-top ordering handled in app.js; spacing here). */
+   stays clickable), and Sort lives on its own right-aligned row above it.
+   Filter UX fixes (owner, 26 Jul 18:41):
+   1) "All" is pinned OUTSIDE the scrolling track — always visible on the left.
+   2) While a filter is active the ticker STOPS (.is-static): chips become a
+      plain swipeable row so the active chip never scrolls out of reach. */
 .feed-toolbar{display:flex;justify-content:flex-end;align-items:center;margin-top:14px}
 .feed-toolbar .feed-views{flex:none}
 .feed-toolbar+.filterbar{margin-top:10px}
 .card-main .card-summary{margin:0 0 9px}
 .card-main .card-top{margin:0}
-.keyword-filter>div{display:block;overflow:hidden;padding:2px 0}
+.keyword-filter>div{display:flex;align-items:center;gap:8px;overflow:hidden;padding:2px 0}
+.keyword-filter .filter-all{flex:none}
+.ticker-viewport{flex:1;min-width:0;overflow:hidden}
 .ticker-track{display:flex;width:max-content;animation:filter-ticker 45s linear infinite}
 .ticker-set{display:flex;gap:8px;flex:none;padding-right:8px}
 .keyword-filter:hover .ticker-track,.keyword-filter:focus-within .ticker-track{animation-play-state:paused}
+.ticker-track.is-static{width:auto;max-width:100%;gap:8px;animation:none;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ticker-track.is-static::-webkit-scrollbar{display:none}
 @keyframes filter-ticker{to{transform:translateX(-50%)}}
-@media(prefers-reduced-motion:reduce){.ticker-track{animation:none}.keyword-filter>div{overflow-x:auto}}
+@media(prefers-reduced-motion:reduce){.ticker-track{animation:none}.ticker-viewport{overflow-x:auto}}
 @media(max-width:760px){.feed-toolbar{display:none}}
 
 /* Source-count badge (owner video, 26 Jul 15:19): the total number of verified
