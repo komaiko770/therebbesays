@@ -185,7 +185,10 @@
       <form id="question-form" class="ask-form">
         <label class="sr-only" for="question">What would you like to research?</label>
         <div class="input-row">
-          <input id="question" name="question" type="text" minlength="2" maxlength="500" autocomplete="off" aria-autocomplete="list" aria-controls="question-suggestions" aria-expanded="false" placeholder="raising confident children" required>
+          <!-- autofocus (owner request, 26 Jul 19:36): cursor lands in the prompt
+               box on page load. iOS Safari ignores autofocus, so mobile users
+               don't get a surprise keyboard. -->
+          <input id="question" name="question" type="text" minlength="2" maxlength="500" autocomplete="off" aria-autocomplete="list" aria-controls="question-suggestions" aria-expanded="false" placeholder="raising confident children" autofocus required>
           <button type="submit"><span>Begin Research</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg></button>
         </div>
         <div id="question-suggestions" class="question-suggestions" role="listbox" aria-label="Existing questions and answers" hidden></div>
