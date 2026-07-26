@@ -105,6 +105,12 @@
     }
     .hero > * { position:relative; z-index:1; }
     .hero > .hero-bg, .hero > .hero-bg-scrim { position:absolute; z-index:0; }
+    /* Autocomplete over the feed ticker (owner screenshot, 26 Jul 19:25):
+       once the dropdown was unclipped from the hero it started painting UNDER
+       the sticky sort/filter bars — the ask-form's z-index:1 (from .hero > *)
+       lost to the ticker's stacking level. Only the form is lifted; the video
+       and scrim stay at z:0, and modals/preloader (z 1200+) remain above. */
+    .hero .ask-form { z-index:120; }
     /* Feed heading removed as visual noise (owner screenshot, 26 Jul) —
        the feed content itself starts right after the hero. */
     .index-section { padding-top:10px; }
