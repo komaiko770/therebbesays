@@ -164,16 +164,20 @@
     </section>
 
     <section id="feed" class="index-section" aria-label="The Feed">
+      <!-- Sort lives on its own row, right-aligned (owner video, 26 Jul 15:14):
+           it was getting lost inside the topic filters, which are a different tool. -->
+      <div class="index-wrap feed-toolbar">
+        <div class="feed-views" aria-label="Sort the feed">
+          <span>Sort</span>
+          <button type="button" class="active" data-feed-view="newest" aria-pressed="true">Newest</button>
+          <button type="button" data-feed-view="loved" aria-pressed="false">Most loved</button>
+          <button type="button" data-feed-view="hearted" aria-pressed="false">My hearts</button>
+        </div>
+      </div>
       <div class="filterbar">
         <div class="index-wrap filterbar-inner">
           <div class="keyword-filter" aria-label="Explore by topic">
             <div id="keyword-filter-list"></div>
-          </div>
-          <div class="feed-views" aria-label="Sort the feed">
-            <span>Sort</span>
-            <button type="button" class="active" data-feed-view="newest" aria-pressed="true">Newest</button>
-            <button type="button" data-feed-view="loved" aria-pressed="false">Most loved</button>
-            <button type="button" data-feed-view="hearted" aria-pressed="false">My hearts</button>
           </div>
         </div>
       </div>
