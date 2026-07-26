@@ -80,11 +80,23 @@ async function keywordSearch(
   // handles multi-word phrases well, so terms are joined with a space rather than run
   // once per term — matches the intent of retrieve.py's per-term substring counting
   // closely enough for trigram-based ranking, which operates on the whole string anyway.
-  const rows = await callRpc(supabaseUrl, adminHeaders, "search_corpus_chunks_text", {
-    search_terms: keywordTerms.join(" "),
-    match_count: topK,
-    filter_collection: collectionFilter,
-  });
+  //
+  // SIMCHA POSTMORTEM (26 Jul): a keyword-search failure (e.g. a database statement
+  // timeout) used to propagate up and kill the ENTIRE research attempt, even though
+  // semantic retrieval was healthy. Keyword search is one of two redundant signals, so
+  // it now degrades gracefully: log loudly, return no keyword hits, and let the run
+  // proceed semantic-only rather than failing the question.
+  let rows: RpcRow[] = [];
+  try {
+    rows = await callRpc(supabaseUrl, adminHeaders, "search_corpus_chunks_text", {
+      search_terms: keywordTerms.join(" "),
+      match_count: topK,
+      filter_collection: collectionFilter,
+    });
+  } catch (e) {
+    console.error(`WARNING: keyword search failed; continuing with semantic-only retrieval: ${e}`);
+    return [];
+  }
   return rows.map((r) => ({
     collection: r.collection,
     source_id: r.source_id,
