@@ -53,3 +53,13 @@ footer{margin-top:22px;padding:27px;border-top:1px solid var(--line);text-align:
 .source-pill.pill-src[aria-selected=true]{color:#241a0b;background:var(--gold);border-color:var(--gold)}
 .detail-inner.has-source-pills .source-reader{grid-template-columns:1fr}
 .detail-inner.has-source-pills .source-reader-nav{display:none}
+
+/* Card hierarchy + consistent hashtag topics (owner video, 26 Jul 15:04):
+   title leads the card, hashtags sit under it, and the answer-modal topic rail
+   uses the same plain #hashtag treatment as the feed instead of pill buttons. */
+.card-main .question-title{margin:0 0 7px}
+.card-main .card-top{margin:0 0 9px}
+.modal-topic-rail .topic-rail-block>div{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:4px 12px}
+.modal-topic-rail .topic-rail-block button.keyword-pill{width:auto;margin:0;padding:0;border:0;background:none;color:var(--faint);font-family:var(--mono);font-size:9px;text-transform:lowercase;line-height:1.7}
+.modal-topic-rail .topic-rail-block button.keyword-pill:hover{color:var(--gold);border:0}
+@media(max-width:760px){.modal-topic-rail .topic-rail-block button.keyword-pill{padding:0;border:0}}
