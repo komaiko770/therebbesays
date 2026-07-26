@@ -83,19 +83,30 @@
     .ask-form { margin:18px auto 0; }
     .form-meta { margin:8px 0 0; justify-content:center; }
     .index-section { padding-top:26px; }
+    /* Header identity (owner, 26 Jul): site name on the left, ב״ה on the far right */
+    .site-header .header-name{grid-column:1;grid-row:1;justify-self:start;font-family:Fraunces,Georgia,serif;font-size:17px;color:#f2ece1;text-decoration:none;letter-spacing:-.01em;white-space:nowrap}
+    .site-header .header-name b{color:#e2bd7c;font-weight:500}
+    .site-header .header-name:hover b{color:#f0cd8d}
+    .site-header .header-actions{grid-column:3;grid-row:1;justify-self:end;display:flex;align-items:center;gap:14px}
+    .site-header .bh{grid-column:auto;grid-row:auto;justify-self:auto;font-size:17px}
     @media (max-width:640px) {
       .header-actions { gap:6px; }
       .auth-button, .auth-signout, .admin-link { padding:6px 11px; font-size:12px; }
       .hero { padding:78px 16px 20px; }
       .hero h1 { white-space:normal; font-size:clamp(20px,5.6vw,26px); }
     }
+    @media (max-width:760px) {
+      .site-header .header-name{font-size:13.5px}
+      .site-header.has-docked-search .header-name{display:none}
+      .site-header .header-actions{gap:8px}
+      .site-header .bh{font-size:15px}
+    }
   </style>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
   <header class="site-header">
-    <span class="header-spacer" aria-hidden="true"></span>
-    <span class="bh" aria-label="With G-d’s help">ב״ה</span>
+    <a class="header-name" href="/">What does the <b>Rebbe</b> say?</a>
     <div class="header-actions">
       <div id="auth-slot" class="auth-slot" aria-live="polite">
         <button class="auth-button" type="button" data-auth-open hidden>Sign in</button>
@@ -104,6 +115,7 @@
           <button class="auth-signout" type="button" data-auth-signout>Sign out</button>
         </div>
       </div>
+      <span class="bh" aria-label="With G-d’s help">ב״ה</span>
     </div>
   </header>
 
@@ -166,7 +178,7 @@
       <button class="auth-x" type="button" data-auth-close aria-label="Close sign-in">×</button>
       <p class="auth-kicker">ב״ה</p>
       <h2 id="auth-title">Sign in to begin research</h2>
-      <p class="auth-lede">Browsing the feed is open to all. Starting a new research question takes a moment to sign in—every question runs real source research against the Rebbe’s published works, so each one has a name behind it. Research takes time; your question stays safely in the queue and appears in the feed once it’s published.</p>
+      <p class="auth-lede">Browsing the feed is open to all. Starting a new research question takes a moment to sign in—every question runs real source research against the Rebbe’s published works, so each one has a name behind it. After you sign in, your research starts automatically — no need to retype your question.</p>
       <button class="auth-google" type="button" data-auth-google>
         <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.9-3c-1 .7-2.4 1.1-4 1.1-3 0-5.6-2-6.5-4.8h-4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.5 14.3a7.2 7.2 0 0 1 0-4.6v-3H1.5a12 12 0 0 0 0 10.7z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 12 0 12 12 0 0 0 1.5 6.7l4 3.1C6.4 6.8 9 4.8 12 4.8z"/></svg>
         Continue with Google
