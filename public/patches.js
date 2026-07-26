@@ -94,12 +94,16 @@ const STAGES = [
   ['synthesizing', 'Writing the sourced answer',               'Composed strictly from verified passages — every claim cited.'],
 ];
 
+// .tw-q: the italic Fraunces closing quote overhangs the text box; with the
+// line-clamp's overflow:hidden it was getting sliced (owner screenshot,
+// 26 Jul 19:24, "Bamidbar 1:2"). Inner padding gives the glyph room inside
+// the clip box; long questions still clamp to 3 lines.
 const overlayCss = `
 #tw-research-overlay{position:fixed;inset:0;z-index:3000;background:radial-gradient(1200px 700px at 50% -10%,#26211a 0%,#141210 60%);color:#efe9dd;overflow:auto;font-family:Inter,system-ui,sans-serif}
 #tw-research-overlay .tw-wrap{min-height:100svh;max-width:660px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;text-align:center;box-sizing:border-box}
 #tw-research-overlay .tw-kicker{color:#c9a349;font-family:Fraunces,Georgia,serif;font-size:20px;margin:0}
 #tw-research-overlay h1{font-family:Fraunces,Georgia,serif;font-weight:500;font-size:clamp(26px,4.6vw,38px);margin:8px 0 4px}
-#tw-research-overlay .tw-q{color:#e9dfc8;font-family:Fraunces,Georgia,serif;font-style:italic;margin:2px auto 14px;max-width:560px;font-size:clamp(19px,3.2vw,27px);line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#tw-research-overlay .tw-q{color:#e9dfc8;font-family:Fraunces,Georgia,serif;font-style:italic;margin:2px auto 14px;max-width:560px;padding:.14em .5em;font-size:clamp(19px,3.2vw,27px);line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 #tw-research-overlay .tw-770{width:min(235px,56vw);height:auto;margin:4px auto 6px;display:block}
 #tw-research-overlay .tw-770-outline{stroke:rgba(201,163,73,.42);stroke-width:2;fill:none}
 #tw-research-overlay .tw-770-detail{stroke:rgba(201,163,73,.32);stroke-width:1.4;fill:none}
