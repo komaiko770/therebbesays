@@ -751,10 +751,13 @@ function renderFeed() {
   // the #hashtags BELOW the primary text — not above it. No "Answer published" badge
   // (the date already says it) and no "Read the complete sourced answer" link (the
   // whole card is clickable). Status still shows for in-progress/failed cards.
+  // Published cards also show the total verified source count (owner video, 15:19) —
+  // the citation depth IS the product, so it belongs on the card.
   feedList.innerHTML = questions.map((item,index) => {
     const hook = hookFor(item);
     const summary = item.status === 'published' ? (hook.tease || fallbackTeaser(item)) : statusCopy(item);
     const image = item.image_url || feedImages[item.slug];
+    const sourceTotal = Number(item.source_count) || 0;
     return `
     <article class="question-card index-card" data-slug="${escapeHtml(item.slug)}">
       <a class="card-thumb" href="/answer/${encodeURIComponent(item.slug)}" aria-label="Open ${escapeHtml(questionText(item.question))}">
@@ -765,7 +768,7 @@ function renderFeed() {
         <p class="card-summary">${escapeHtml(summary)}</p>
         <div class="card-top">${item.status === 'published' ? '' : `<span class="status ${item.status}">${label(item.status)}</span>`}<div class="instagram-keywords">${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div></div>
       </div>
-      <div class="card-side"><time datetime="${item.created_at}">${formatDate(item.created_at)}</time>${heartButton(item)}${adminDeleteButton(item,'card')}</div>
+      <div class="card-side"><time datetime="${item.created_at}">${formatDate(item.created_at)}</time>${item.status === 'published' && sourceTotal ? `<span class="card-sources">${sourceTotal} source${sourceTotal === 1 ? '' : 's'}</span>` : ''}${heartButton(item)}${adminDeleteButton(item,'card')}</div>
     </article>`;
   }).join('');
   requestAnimationFrame(() => activateInteractions(document));
@@ -876,7 +879,7 @@ function renderDetail(item, shouldScroll = true) {
     </nav>
     ${item.image_url ? `<figure class="answer-hero-image"><img src="${escapeHtml(item.image_url)}" alt="Editorial image for ${escapeHtml(topicText(item.question))}"><figcaption class="answer-hero-title">${escapeHtml(questionText(item.question))}</figcaption></figure>` : ''}
     <div class="modal-layout"><main class="modal-answer-main">
-    <div class="answer-meta-row"><p class="eyebrow">${label(item.status)} · asked ${formatDate(item.created_at)}</p><div class="answer-reaction"><span>Was this question worth asking?</span>${heartButton(item, true)}</div></div>
+    <div class="answer-meta-row"><p class="eyebrow">${label(item.status)} · asked ${formatDate(item.created_at)}${item.status === 'published' && orderedSources.length ? ` · ${orderedSources.length} source${orderedSources.length === 1 ? '' : 's'}` : ''}</p><div class="answer-reaction"><span>Was this question worth asking?</span>${heartButton(item, true)}</div></div>
     ${item.image_url ? '' : `<h2>${escapeHtml(questionText(item.question))}</h2>`}
     ${item.status === 'published'
       ? `<div class="answer-tabs" role="tablist" aria-label="Answer sections">
