@@ -82,7 +82,9 @@
     .hero h1 { margin:8px 0 0; font-size:clamp(22px,3vw,36px); }
     .ask-form { margin:18px auto 0; }
     .form-meta { margin:8px 0 0; justify-content:center; }
-    .index-section { padding-top:26px; }
+    /* Feed heading removed as visual noise (owner screenshot, 26 Jul) —
+       the feed content itself starts right after the hero. */
+    .index-section { padding-top:10px; }
     /* Header identity (owner, 26 Jul): site name on the left, ב״ה on the far right */
     .site-header .header-name{grid-column:1;grid-row:1;justify-self:start;font-family:Fraunces,Georgia,serif;font-size:17px;color:#f2ece1;text-decoration:none;letter-spacing:-.01em;white-space:nowrap}
     .site-header .header-name b{color:#e2bd7c;font-weight:500}
@@ -156,13 +158,7 @@
       </form>
     </section>
 
-    <section id="feed" class="index-section" aria-labelledby="feed-title">
-      <div class="index-wrap">
-        <div class="index-heading">
-          <div><p class="section-kicker">Live public research</p><h2 id="feed-title">The Feed</h2></div>
-          <p>A living feed of questions, sources, and teachings—growing in real time, built in public.</p>
-        </div>
-      </div>
+    <section id="feed" class="index-section" aria-label="The Feed">
       <div class="filterbar">
         <div class="index-wrap filterbar-inner">
           <div class="keyword-filter" aria-label="Explore by topic">
