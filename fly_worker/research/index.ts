@@ -33,6 +33,11 @@
 //      keyword search; if no (the vast majority), execution proceeds through the exact
 //      same topical path as before. Both routes converge on the same verify() and
 //      synthesize() calls, and the funnel records which route ran.
+//   8. ZERO-CITATION PUBLISH FIX (26 Jul, "simcha" postmortem): a 0-citation honest
+//      answer used to write confidence "none", which violates the questions table's
+//      check constraint (high/medium/low/NULL only) — the final save failed with 23514
+//      AFTER a full successful research run, and the question was marked failed.
+//      Zero citations now save confidence NULL.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -271,7 +276,9 @@ async function researchQuestion(question: Question) {
       answer_markdown: synthesis.answerMarkdown || null,
       short_answer: synthesis.answerMarkdown ? synthesis.answerMarkdown.slice(0, 280) : null,
       keywords: synthesis.topics,
-      confidence: synthesis.citations.length >= 2 ? "medium" : synthesis.citations.length === 1 ? "low" : "none",
+      // NULL (not "none") for zero citations — the questions_confidence_check
+      // constraint only allows high/medium/low/NULL ("simcha" postmortem, 26 Jul).
+      confidence: synthesis.citations.length >= 2 ? "medium" : synthesis.citations.length === 1 ? "low" : null,
       source_count: synthesis.citations.length,
       completed_at: new Date().toISOString(),
       research_error: null,
