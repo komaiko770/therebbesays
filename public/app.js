@@ -202,10 +202,26 @@ const briefCollection = brief => {
   return 'other';
 };
 
+// Compact source titles (owner video, 26 Jul): the source-reader menu was drowning in
+// repetition — every entry read "Source N (Igrot Kodesh, Vol. 6, letter 1786, ...)"
+// inside a collection tab that already names the book. Strip the "Source N (...)"
+// wrapper everywhere, and additionally drop the book name in the left-hand menu so each
+// entry is just the identifying detail: "Vol. 6, letter 1786, 20 Menachem Av 5712".
+const briefInnerTitle = title => {
+  const raw = String(title || '').trim();
+  const wrapped = raw.match(/^Source\s*\d+\s*[—:-]?\s*\((.+)\)\s*$/i) || raw.match(/^Source\s*\d+\s*[—:-]\s*(.+)$/i);
+  return (wrapped ? wrapped[1] : raw).trim();
+};
+const briefNavLabel = title => {
+  const inner = briefInnerTitle(title);
+  const compact = inner.replace(/^(?:Toras\s*Menachem|Igros\s*Kodesh|Igrot\s*Kodesh)\s*[,،:—-]?\s*/i, '').replace(/^,\s*/, '').trim();
+  return compact || inner || String(title || '');
+};
+
 function renderSourceReader(briefs, sources = [], displayByOrdinal = new Map()) {
   if (!briefs.length) return `<p class="source-tab-intro">No structured source briefs are available for this answer yet.</p>`;
-  const nav = briefs.map((brief,index) => `<button type="button" data-source-brief="${index}" aria-selected="${index === 0 ? 'true' : 'false'}"><span>${String(index + 1).padStart(2,'0')}</span>${escapeHtml(brief.title)}</button>`).join('');
-  const panels = briefs.map((brief,index) => `<article class="source-brief-panel" data-source-brief-panel="${index}" ${index ? 'hidden' : ''}><p class="source-brief-kicker">Source ${String(index + 1).padStart(2,'0')} of ${String(briefs.length).padStart(2,'0')}</p><h3>${escapeHtml(brief.title)}</h3><div class="answer-copy">${brief.body ? renderSourceBriefBody(brief.body, sources, displayByOrdinal) : '<p>This source is part of the verified citation trail for this answer.</p>'}</div>${brief.source?.url ? `<a class="source-brief-link" href="${escapeHtml(brief.source.url)}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : ''}</article>`).join('');
+  const nav = briefs.map((brief,index) => `<button type="button" data-source-brief="${index}" aria-selected="${index === 0 ? 'true' : 'false'}"><span>${String(index + 1).padStart(2,'0')}</span>${escapeHtml(briefNavLabel(brief.title))}</button>`).join('');
+  const panels = briefs.map((brief,index) => `<article class="source-brief-panel" data-source-brief-panel="${index}" ${index ? 'hidden' : ''}><p class="source-brief-kicker">Source ${String(index + 1).padStart(2,'0')} of ${String(briefs.length).padStart(2,'0')}</p><h3>${escapeHtml(briefInnerTitle(brief.title))}</h3><div class="answer-copy">${brief.body ? renderSourceBriefBody(brief.body, sources, displayByOrdinal) : '<p>This source is part of the verified citation trail for this answer.</p>'}</div>${brief.source?.url ? `<a class="source-brief-link" href="${escapeHtml(brief.source.url)}" target="_blank" rel="noopener noreferrer">Open original source <span aria-hidden="true">↗</span></a>` : ''}</article>`).join('');
   return `<div class="source-reader"><nav class="source-reader-nav" aria-label="Source briefs">${nav}</nav><div class="source-reader-detail">${panels}</div></div>`;
 }
 function sourcesMarkup(orderedSources, displayByOrdinal) {
