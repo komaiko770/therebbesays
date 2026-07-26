@@ -331,7 +331,7 @@ function articleDiscovery(currentSlug) {
   const items = published.length ? published : fallback;
   if (!items.length) return '';
   const base = [];
-  while (base.length < 5) base.push(...items);
+  while (base.length < 5) base.push(...items);  
   const sequence = [...base.slice(0, 5), ...base.slice(0, 5)];
   return `<section class="article-discovery" aria-labelledby="article-discovery-title">
     <div class="article-discovery-head">
@@ -736,6 +736,10 @@ function renderFeed() {
     feedList.innerHTML = `<div class="empty">${state.feedView === 'hearted' ? 'You have not hearted any questions yet. Tap a heart to build your list.' : query ? 'No questions match that search yet.' : 'No questions yet. Ask the first one above.'}</div>`;
     return;
   }
+  // Card hierarchy (owner video, 26 Jul 15:04): title first, hashtags below it, no
+  // "Answer published" badge (the date already says it) and no "Read the complete
+  // sourced answer" link (the whole card is clickable). Status still shows for
+  // in-progress/failed cards, where it carries real information.
   feedList.innerHTML = questions.map((item,index) => {
     const hook = hookFor(item);
     const summary = item.status === 'published' ? (hook.tease || fallbackTeaser(item)) : statusCopy(item);
@@ -746,10 +750,9 @@ function renderFeed() {
         ${image ? `<img src="${escapeHtml(image)}" alt="Editorial image for ${escapeHtml(topicText(item.question))}" loading="lazy">` : `<span class="card-thumb-fallback" aria-hidden="true">${String(index + 1).padStart(2,'0')}</span>`}
       </a>
       <div class="card-main">
-        <div class="card-top"><span class="status ${item.status}">${label(item.status)}</span><div class="instagram-keywords">${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div></div>
         <a class="question-title" href="/answer/${encodeURIComponent(item.slug)}">${escapeHtml(displayTopic(item.question))}</a>
+        <div class="card-top">${item.status === 'published' ? '' : `<span class="status ${item.status}">${label(item.status)}</span>`}<div class="instagram-keywords">${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div></div>
         <p class="card-summary">${escapeHtml(summary)}</p>
-        <a class="discovery-read" href="/answer/${encodeURIComponent(item.slug)}">${item.status === 'published' ? 'Read the complete sourced answer' : 'Open the research page'} ↗</a>
       </div>
       <div class="card-side"><time datetime="${item.created_at}">${formatDate(item.created_at)}</time>${heartButton(item)}${adminDeleteButton(item,'card')}</div>
     </article>`;
@@ -884,7 +887,7 @@ function renderDetail(item, shouldScroll = true) {
     </main><aside class="modal-topic-rail" aria-label="Answer sharing and topics">
       ${sharePanel(item)}
       <div class="topic-rail-block"><p>Topics in this answer</p>
-        <div>${keywordsFor(item).map(keyword => `<button type="button" data-keyword="${escapeHtml(keyword)}">${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div>
+        <div>${keywordsFor(item).map(keyword => `<button type="button" class="keyword-pill" data-keyword="${escapeHtml(keyword)}">#${escapeHtml(displayKeyword(keyword))}</button>`).join('')}</div>
       </div>
     </aside></div>
   </div>`;
