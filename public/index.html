@@ -89,6 +89,18 @@
     .site-header .header-name:hover b{color:#f0cd8d}
     .site-header .header-actions{grid-column:3;grid-row:1;justify-self:end;display:flex;align-items:center;gap:14px}
     .site-header .bh{grid-column:auto;grid-row:auto;justify-self:auto;font-size:17px}
+    /* Answer tabs: Overview / Toras Menachem / Igros Kodesh (owner, 26 Jul).
+       Horizontally scrollable when tight; never widens the page. */
+    .modal-answer-main{min-width:0;max-width:100%}
+    .answer-tabs{display:flex;flex-wrap:nowrap;gap:8px;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .answer-tabs::-webkit-scrollbar{display:none}
+    .answer-tabs button{flex:0 0 auto;white-space:nowrap}
+    .answer-tabs button small{opacity:.65;font-size:.85em}
+    .answer-tabs .tab-tm{border-color:rgba(201,163,73,.6);color:#e2bd7c}
+    .answer-tabs .tab-tm[aria-selected="true"]{background:rgba(201,163,73,.16)}
+    .answer-tabs .tab-ik{border-color:rgba(206,206,216,.5);color:#d9d9e2}
+    .answer-tabs .tab-ik[aria-selected="true"]{background:rgba(206,206,216,.14);border-color:#d9d9e2}
+    .source-directory{margin-top:22px}
     @media (max-width:640px) {
       .header-actions { gap:6px; }
       .auth-button, .auth-signout, .admin-link { padding:6px 11px; font-size:12px; }
@@ -98,6 +110,9 @@
     @media (max-width:760px) {
       .site-header .header-name{font-size:13.5px}
       .site-header.has-docked-search .header-name{display:none}
+      /* Docked search owns the mobile header row — auth controls step aside
+         (they overlapped the search bar; owner screenshot, 26 Jul). */
+      .site-header.has-docked-search .header-actions{display:none}
       .site-header .header-actions{gap:8px}
       .site-header .bh{font-size:15px}
     }
