@@ -98,7 +98,7 @@ const overlayCss = `
 #tw-research-overlay .tw-wrap{min-height:100svh;max-width:660px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;justify-content:center;text-align:center;box-sizing:border-box}
 #tw-research-overlay .tw-kicker{color:#c9a349;font-family:Fraunces,Georgia,serif;font-size:20px;margin:0}
 #tw-research-overlay h1{font-family:Fraunces,Georgia,serif;font-weight:500;font-size:clamp(26px,4.6vw,38px);margin:8px 0 4px}
-#tw-research-overlay .tw-q{color:#a99f8c;font-style:italic;margin:0 0 12px;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tw-research-overlay .tw-q{color:#e9dfc8;font-family:Fraunces,Georgia,serif;font-style:italic;margin:2px auto 14px;max-width:560px;font-size:clamp(19px,3.2vw,27px);line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 #tw-research-overlay .tw-770{width:min(235px,56vw);height:auto;margin:4px auto 6px;display:block}
 #tw-research-overlay .tw-770-outline{stroke:rgba(201,163,73,.42);stroke-width:2;fill:none}
 #tw-research-overlay .tw-770-detail{stroke:rgba(201,163,73,.32);stroke-width:1.4;fill:none}
@@ -126,6 +126,7 @@ const overlayCss = `
 @media (max-height:780px){
   #tw-research-overlay .tw-770{width:min(190px,50vw)}
   #tw-research-overlay h1{font-size:clamp(23px,4vw,30px)}
+  #tw-research-overlay .tw-q{font-size:clamp(17px,2.8vw,22px)}
   #tw-research-overlay .tw-stage{padding:6px 0 6px 26px}
   #tw-research-overlay .tw-stage.active{padding:8px 0 8px 26px}
   #tw-research-overlay .tw-stage::before{top:12px}
@@ -135,6 +136,7 @@ const overlayCss = `
   #tw-research-overlay .tw-770{width:min(150px,42vw)}
   #tw-research-overlay .tw-note{display:none}
   #tw-research-overlay .tw-kicker{font-size:16px}
+  #tw-research-overlay .tw-q{font-size:clamp(16px,2.6vw,20px);-webkit-line-clamp:2}
   #tw-research-overlay .tw-stage{padding:4px 0 4px 26px}
   #tw-research-overlay .tw-stage.active{padding:6px 0 6px 26px}
   #tw-research-overlay .tw-stage::before{top:9px}
