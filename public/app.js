@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const SUPABASE_URL = 'https://euixoavdzwaactdbxnpk.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu';
+const AUTH_STORAGE_KEY = 'sb-euixoavdzwaactdbxnpk-auth-token';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
 // Single shared Supabase client for the whole page. patches.js reuses this instead of
@@ -41,6 +42,7 @@ const suggestions = document.querySelector('#question-suggestions');
 const keywordFilterList = document.querySelector('#keyword-filter-list');
 const authModal = document.querySelector('#auth-modal');
 const authSlot = document.querySelector('#auth-slot');
+const authCardHome = authModal?.querySelector('.auth-card')?.innerHTML || '';
 let searchDocked = false;
 let searchPlaceholder;
 const teaserTrack = document.querySelector('#teaser-track');
@@ -418,7 +420,18 @@ function positionCitationTooltip(anchor) {
 
 async function api(path = '', options = {}) {
   const authHeader = auth.session?.access_token ? { authorization: `Bearer ${auth.session.access_token}` } : {};
-  const response = await fetch(`/api/questions${path}`, { ...options, headers: { 'content-type':'application/json', 'x-visitor-id':visitorId, ...authHeader, ...(options.headers || {}) } });
+  // Hard cap every API call so the UI can never sit on a spinner forever.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch(`/api/questions${path}`, { ...options, signal: controller.signal, headers: { 'content-type':'application/json', 'x-visitor-id':visitorId, ...authHeader, ...(options.headers || {}) } });
+  } catch (fetchError) {
+    const timedOut = fetchError?.name === 'AbortError';
+    throw new Error(timedOut ? 'The request timed out. Please try again.' : 'Network error — please check your connection and try again.');
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) { const error = new Error(data.error || 'Something went wrong.'); error.status = response.status; throw error; }
   return data;
@@ -426,7 +439,12 @@ async function api(path = '', options = {}) {
 
 /* ---------- Authentication ---------- */
 function redirectTarget() {
-  return `${location.origin}${location.pathname}${location.search}`;
+  // Carry the pending question in the redirect URL itself, so auto-resume works even
+  // when the magic link opens in a different tab, window, or browser profile.
+  const url = new URL(`${location.origin}${location.pathname}${location.search}`);
+  const pending = auth.pending?.question || readPendingQuestion();
+  if (pending) url.searchParams.set('pq', pending.slice(0, 500));
+  return url.toString();
 }
 
 function setAuthStatus(message, tone = '') {
@@ -436,8 +454,33 @@ function setAuthStatus(message, tone = '') {
   status.dataset.tone = tone;
 }
 
+function restoreAuthCard() {
+  const card = authModal?.querySelector('.auth-card');
+  if (card && authCardHome && card.dataset.state) {
+    card.innerHTML = authCardHome;
+    delete card.dataset.state;
+  }
+}
+
+// Unmissable confirmation state after requesting a magic link (owner feedback, 26 Jul).
+function showEmailSentState(email) {
+  const card = authModal?.querySelector('.auth-card');
+  if (!card) return;
+  card.dataset.state = 'email-sent';
+  card.innerHTML = `
+    <button class="auth-x" type="button" data-auth-close aria-label="Close sign-in">×</button>
+    <p class="auth-kicker">ב״ה</p>
+    <div aria-hidden="true" style="font-size:46px;line-height:1;margin:10px 0 12px">📬</div>
+    <h2>Check your inbox</h2>
+    <p class="auth-lede">We sent a one-time sign-in link to<br><strong style="color:#efe9dd">${escapeHtml(email)}</strong></p>
+    <p class="auth-lede">Open the link and you're in — your research starts automatically. No need to retype your question.</p>
+    <p class="auth-fineprint">Wrong address, or no email after a minute? Close this and try again.</p>`;
+  requestAnimationFrame(() => card.focus?.({ preventScroll:true }));
+}
+
 function openAuthModal(message = '') {
   if (!authModal) return;
+  restoreAuthCard();
   modalReturnFocus = document.activeElement;
   authModal.hidden = false;
   authModal.setAttribute('aria-hidden', 'false');
@@ -452,6 +495,7 @@ function closeAuthModal() {
   authModal.setAttribute('aria-hidden', 'true');
   if (detail.hidden) document.body.classList.remove('modal-open');
   setAuthStatus('');
+  restoreAuthCard();
   modalReturnFocus?.focus?.({ preventScroll:true });
   modalReturnFocus = null;
 }
@@ -477,6 +521,16 @@ async function refreshAdminFlag() {
   } catch { auth.isAdmin = false; }
 }
 
+// The server said our token is no good. Try one silent refresh before giving up.
+async function recoverSession() {
+  try {
+    const timeout = new Promise(resolve => setTimeout(() => resolve({ data:null, error:new Error('refresh timeout') }), 4000));
+    const { data, error } = await Promise.race([supabase.auth.refreshSession(), timeout]);
+    if (!error && data?.session) { auth.session = data.session; refreshAuthUI(); return true; }
+  } catch {}
+  return false;
+}
+
 async function handleAuthChange(session) {
   const wasSignedIn = Boolean(auth.session);
   auth.session = session || null;
@@ -491,8 +545,8 @@ async function handleAuthChange(session) {
     if (current) renderDetail(current, false);
   }
   // Resume a pending question after a fresh sign-in: in-memory for same-page modal
-  // flows, localStorage for full-page OAuth/magic-link redirects (the typed question
-  // would otherwise be lost — owner report, 26 Jul).
+  // flows, localStorage/URL for full-page OAuth/magic-link redirects (the typed
+  // question would otherwise be lost — owner report, 26 Jul).
   if (auth.session && !wasSignedIn) {
     let pending = auth.pending;
     auth.pending = null;
@@ -527,11 +581,18 @@ async function signInWithEmail(email) {
   setAuthStatus('Sending your sign-in link…', 'info');
   const { error } = await supabase.auth.signInWithOtp({ email, options:{ emailRedirectTo: redirectTarget() } });
   if (error) setAuthStatus(error.message || 'We could not send the link. Please try again.', 'error');
-  else setAuthStatus('Check your inbox for a one-time sign-in link. Your research will start automatically after you sign in.', 'success');
+  else showEmailSentState(email);
 }
 
 async function signOut() {
-  await supabase.auth.signOut();
+  // Never leave the button unresponsive: cap the network sign-out at 1.5s, then
+  // hard-clear the local session and reload so the UI always reflects reality.
+  try { await Promise.race([supabase.auth.signOut(), new Promise(resolve => setTimeout(resolve, 1500))]); } catch {}
+  try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
+  try { localStorage.removeItem(PENDING_KEY); } catch {}
+  auth.session = null;
+  auth.isAdmin = false;
+  location.reload();
 }
 
 function ensureSignedIn(question, statusEl, button) {
@@ -545,7 +606,7 @@ function ensureSignedIn(question, statusEl, button) {
   return false;
 }
 
-async function submitQuestion(question, statusEl, button) {
+async function submitQuestion(question, statusEl, button, retried = false) {
   if (!question || question.length < 2) return;
   if (button) button.disabled = true;
   if (statusEl) statusEl.textContent = 'Saving your question…';
@@ -558,6 +619,14 @@ async function submitQuestion(question, statusEl, button) {
     location.assign(`/answer/${encodeURIComponent(result.question.slug)}`);
   } catch (error) {
     if (error?.status === 401 || /sign in/i.test(error?.message || '')) {
+      // Stale/expired session: refresh silently and retry once. If that fails, drop
+      // the dead session and ask for a real sign-in — never leave the UI hanging.
+      if (!retried && auth.session && await recoverSession()) {
+        if (button) button.disabled = false;
+        return submitQuestion(question, statusEl, button, true);
+      }
+      auth.session = null;
+      refreshAuthUI();
       ensureSignedIn(question, statusEl, button);
     } else if (statusEl) {
       statusEl.textContent = error.message;
@@ -934,9 +1003,12 @@ authModal?.addEventListener('click', event => {
   if (event.target.closest('[data-auth-close]')) { closeAuthModal(); return; }
   if (event.target.closest('[data-auth-google]')) { signInWithGoogle(); return; }
 });
-authModal?.querySelector('[data-auth-email]')?.addEventListener('submit', event => {
+// Delegated so the handler survives the auth-card content swaps (email-sent state).
+authModal?.addEventListener('submit', event => {
+  const emailForm = event.target.closest('[data-auth-email]');
+  if (!emailForm) return;
   event.preventDefault();
-  const email = event.target.elements.email.value.trim();
+  const email = emailForm.elements.email.value.trim();
   if (email) signInWithEmail(email);
 });
 
@@ -1094,10 +1166,21 @@ document.addEventListener('keydown', event => {
 });
 
 /* ---------- Auth bootstrap ---------- */
+// If the sign-in redirect carried the pending question in the URL (?pq=...), absorb it
+// first — this survives magic links opened in a different tab, window, or profile.
+try {
+  const pq = new URLSearchParams(location.search).get('pq');
+  if (pq && pq.trim().length >= 2) {
+    localStorage.setItem(PENDING_KEY, JSON.stringify({ question: pq.trim(), at: Date.now() }));
+    const cleaned = new URL(location.href);
+    cleaned.searchParams.delete('pq');
+    history.replaceState(history.state, '', cleaned.pathname + (cleaned.searchParams.toString() ? `?${cleaned.searchParams}` : '') + location.hash);
+  }
+} catch {}
+
 // Deterministic auth-callback absorption: explicitly consume OAuth/magic-link tokens
 // from the return URL (implicit-flow hash or PKCE ?code) instead of relying only on
-// detectSessionInUrl, then hand off to normal session handling. This is what makes
-// Google/magic-link sign-in actually stick (owner video, 26 Jul).
+// detectSessionInUrl, then hand off to normal session handling.
 async function absorbAuthCallback() {
   try {
     const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -1120,16 +1203,21 @@ async function absorbAuthCallback() {
   }
 }
 
-supabase.auth.onAuthStateChange((_event, session) => handleAuthChange(session));
-absorbAuthCallback().finally(() => {
-  supabase.auth.getSession().then(({ data }) => handleAuthChange(data.session)).catch(() => handleAuthChange(null));
-});
+try {
+  supabase.auth.onAuthStateChange((_event, session) => handleAuthChange(session));
+  absorbAuthCallback().finally(() => {
+    supabase.auth.getSession().then(({ data }) => handleAuthChange(data.session)).catch(() => handleAuthChange(null));
+  });
+} catch (error) {
+  console.warn('Auth bootstrap failed', error);
+  handleAuthChange(null);
+}
 // Failsafe: if the auth client ever wedges again, read the persisted session straight
 // from storage after 2.5s so the header auth controls are never stuck hidden.
 setTimeout(() => {
   if (auth.ready) return;
   try {
-    const raw = JSON.parse(localStorage.getItem('sb-euixoavdzwaactdbxnpk-auth-token') || 'null');
+    const raw = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null');
     const stored = raw?.access_token ? raw : raw?.currentSession || null;
     handleAuthChange(stored);
   } catch { handleAuthChange(null); }
