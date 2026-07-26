@@ -85,7 +85,7 @@ function syncChipVisibility() {
 })();
 
 // --- 2) Truthful research preloader -----------------------------------------
-// Stage contract with the Fly worker (research_stage column):
+// Stage contract with the Fly worker (research_stage column) — TOPICAL route:
 const STAGES = [
   ['analyzing',    'Analyzing your question',                  'Building Hebrew search queries and key terms from what you asked.'],
   ['retrieving',   'Searching Toras Menachem (vols. 1–73) & Igros Kodesh (vols. 1–28)',  'Toras Menachem covers 1950–1973. Igros Kodesh covers letters from 1928–1973 in Hebrew and Yiddish.'],
@@ -93,6 +93,29 @@ const STAGES = [
   ['verifying',    'Verifying every source',                   'Each passage faces adversarial verification votes before it may be cited.'],
   ['synthesizing', 'Writing the sourced answer',               'Composed strictly from verified passages — every claim cited.'],
 ];
+
+// CITATION route (owner report, 26 Jul 19:27): verse/daf questions take the
+// worker's direct citation-index route — "retrieving" is a sub-second index
+// lookup (invisible between 5s polls) and "reflecting" NEVER runs, so the
+// 5-stage list visibly jumped 1st -> 4th. Rather than fake the middle stages,
+// citation questions get their own honest 4-stage list matching what the
+// worker actually does. Detection is a client-side pattern check on the
+// question text; if the backend ever reports "reflecting", the question was
+// really topical and the 5-stage list takes over.
+const CITATION_STAGES = [
+  ['analyzing',    'Analyzing your question',                        'Recognizing the exact verse or daf you asked about.'],
+  ['retrieving',   'Looking up every passage citing this reference', 'Direct lookup in the citation index of Toras Menachem & Igros Kodesh — supplemented by semantic search when the index is sparse.'],
+  ['verifying',    'Verifying every source',                         'Each passage faces adversarial verification votes before it may be cited.'],
+  ['synthesizing', 'Writing the sourced answer',                     'Composed strictly from verified passages — every claim cited.'],
+];
+
+// chapter:verse ("Bamidbar 1:2"), daf notation ("Brachos 2a"), or the word "daf".
+const CITATION_Q_RE = /(\b\d+\s*:\s*\d+\b|\b\d{1,3}\s*[ab]\b|\bdaf\b)/i;
+
+function stagesFor(q) {
+  if (q.research_stage === 'reflecting') return STAGES; // reflection only exists on the topical route
+  return CITATION_Q_RE.test(q.question || '') ? CITATION_STAGES : STAGES;
+}
 
 // .tw-q: the italic Fraunces closing quote overhangs the text box; with the
 // line-clamp's overflow:hidden it was getting sliced (owner screenshot,
@@ -198,10 +221,6 @@ function fmtElapsed(startIso) {
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
-function stageIndex(stage) {
-  return STAGES.findIndex(([key]) => key === stage);
-}
-
 // Real-time (1s) elapsed counter, independent of the 5s data poll.
 let elapsedTimer = null;
 function startElapsedTicker() {
@@ -235,9 +254,10 @@ function renderOverlay(q) {
   if (lastOverlayKey === key) { syncChipVisibility(); return; }
   lastOverlayKey = key;
   const queued = q.status === 'queued';
-  const idx = stageIndex(q.research_stage);
+  const stages = stagesFor(q);
+  const idx = stages.findIndex(([key2]) => key2 === q.research_stage);
   const elapsed = !queued ? fmtElapsed(q.research_started_at) : null;
-  const stagesHtml = STAGES.map(([key2, title, desc], i) => {
+  const stagesHtml = stages.map(([key2, title, desc], i) => {
     let cls = '';
     if (!queued && idx >= 0) cls = i < idx ? 'done' : i === idx ? 'active' : '';
     else if (!queued && idx < 0) cls = i === 0 ? 'active' : '';
