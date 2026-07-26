@@ -14,6 +14,11 @@
 //      verifying -> synthesizing). The site preloader reads this column, so what users
 //      see is the pipeline's true state — never simulated. Stage writes are
 //      best-effort: a failed stage write never kills the research task itself.
+//   5. RETRIEVAL COVERAGE (26 Jul, "France" postmortem): TOP_K_PER_COLLECTION raised
+//      15 -> 30, retrieval now fans out over MULTIPLE Hebrew sub-queries (main query +
+//      up to 3 alternates from analyzeQuestion) instead of one, and every run records a
+//      `research_funnel` JSON on the questions row (retrieved -> genuine -> cited, plus
+//      the exact queries used) so coverage gaps are visible instead of silent.
 //
 // The pipeline (analyzeQuestion -> hybridSearchPerCollection -> reflectOnCandidates ->
 // verify -> synthesize) is unchanged.
@@ -47,9 +52,10 @@ const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
 const adminHeaders = { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" };
 
-// Retrieval/verification tuning — same defaults as full_pipeline_test.py, the harness
-// this pipeline was validated with across the 5 benchmarked test topics.
-const TOP_K_PER_COLLECTION = 15;
+// Retrieval/verification tuning. TOP_K_PER_COLLECTION was 15 (the full_pipeline_test.py
+// default); raised to 30 after the "France" postmortem showed the corpus held ~250+
+// on-topic documents while the funnel could only ever consider 30 candidates total.
+const TOP_K_PER_COLLECTION = 30;
 const N_ADVERSARIAL_VOTERS = 3;
 
 function response(body: unknown, status = 200) {
@@ -131,15 +137,16 @@ async function researchQuestion(question: Question) {
   const attempt = (question.research_attempts || 0) + 1;
   await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing" });
   try {
-    // Step 1: turn the raw question into a Hebrew query + keyword terms + scope guidance.
+    // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
     const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+    const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
 
-    // Step 2: hybrid retrieval (semantic + keyword), pulled separately per collection.
+    // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
     await setStage(question.id, "retrieving");
     const byCollection = await hybridSearchPerCollection(
       SUPABASE_URL,
       adminHeaders,
-      analysis.hebrew_query,
+      queryTexts,
       analysis.keyword_terms,
       TOP_K_PER_COLLECTION,
     );
@@ -175,6 +182,28 @@ async function researchQuestion(question: Question) {
     await setStage(question.id, "synthesizing");
     const synthesis = await synthesize(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question, genuineCandidates);
 
+    // Funnel accounting — what was found vs. what survived vs. what got cited. Stored on
+    // the question row so coverage problems are diagnosable instead of silent.
+    const refutedByVote = verified.verdicts.filter((v) => v.adversarial_check?.verdict === "REFUTED").length;
+    const funnel = {
+      top_k_per_collection: TOP_K_PER_COLLECTION,
+      queries: {
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      },
+      retrieved: {
+        toras_menachem: byCollection.toras_menachem?.length ?? 0,
+        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
+        total: candidates.length,
+      },
+      genuine_pass1: genuineCandidates.length + refutedByVote,
+      refuted_by_adversarial_vote: refutedByVote,
+      genuine_final: genuineCandidates.length,
+      cited: synthesis.citations.length,
+    };
+    console.log(`funnel ${question.id}:`, JSON.stringify(funnel));
+
     await replaceSources(question.id, synthesis.citations);
     await patchQuestion(question.id, {
       status: "published",
@@ -186,6 +215,7 @@ async function researchQuestion(question: Question) {
       completed_at: new Date().toISOString(),
       research_error: null,
       research_stage: null,
+      research_funnel: funnel,
     });
     await queueQuestionImage(question.id);
   } catch (error) {
