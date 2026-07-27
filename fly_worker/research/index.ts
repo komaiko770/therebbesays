@@ -62,6 +62,13 @@
 //      (same verified noreply@therebbesays.com domain the auth emails use) and stamps
 //      questions.answer_email_sent_at so re-runs never double-send. Best-effort:
 //      requires the RESEND_API_KEY Fly secret; a send failure never fails the publish.
+//  13. REJECTION AUDIT TRAIL (27 Jul, owner request): the funnel counts what was
+//      rejected; `research_audit` (new jsonb column) records WHAT and WHY, per
+//      candidate — pass-1 verdict + justification, adversarial vote tally, final
+//      disposition. near_misses additionally carry display-ready detail (Hebrew
+//      excerpt, pass-1 reasoning, the refuting reviewers' reasons) that the site's
+//      Research trail tab shows publicly, so readers see what was reviewed and
+//      turned away — not just how much.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -70,7 +77,7 @@ import { analyzeQuestion, reflectOnCandidates } from "./analyzeQuestion.ts";
 import { hybridSearchPerCollection } from "./retrieve.ts";
 import { parseCitationQuestion, lookupCitationChunks } from "./citationLookup.ts";
 import { verify } from "./verify.ts";
-import { synthesize } from "./synthesize.ts";
+import { synthesize, collectionLabel } from "./synthesize.ts";
 import type { Candidate } from "./types.ts";
 
 type Question = {
@@ -126,6 +133,9 @@ function capCandidateTexts(list: Candidate[]): Candidate[] {
       : c
   );
 }
+
+// Hebrew excerpt length for near-miss display on the site (rejection audit, 27 Jul).
+const AUDIT_EXCERPT_CHARS = 400;
 
 // Plain-text excerpt for cards and share previews: heading lines, [^N] citation
 // markers, and markdown syntax stripped, whitespace collapsed (change 11).
@@ -424,6 +434,68 @@ async function researchQuestion(question: Question) {
     };
     console.log(`funnel ${question.id}:`, JSON.stringify(funnel));
 
+    // REJECTION AUDIT TRAIL (change 13): per-candidate record of every verdict and
+    // vote, plus display-ready near-miss detail for the site's Research trail tab.
+    const verdictByIndex = new Map(verified.verdicts.map((v) => [v.index, v]));
+    const auditEntries = candidates.map((c, i) => {
+      const v = verdictByIndex.get(i);
+      const refuted = v?.adversarial_check?.verdict === "REFUTED";
+      const final = !v
+        ? "no_verdict"
+        : refuted
+        ? "near_miss"
+        : v.verdict === "GENUINE"
+        ? "cited"
+        : v.verdict === "TANGENTIAL"
+        ? "tangential"
+        : "false_positive";
+      return {
+        index: i,
+        title: `${collectionLabel(c.collection)}, ${c.volume_heading} / ${c.item_heading}`,
+        collection: c.collection,
+        chunk_index: c.chunk_index,
+        url: `https://chabadlibrary.org/books/${c.source_id}`,
+        final,
+        pass1_verdict: v ? (refuted ? "GENUINE" : v.verdict) : null,
+        justification: v?.justification ?? null,
+        adversarial_vote: v?.adversarial_check
+          ? { verdict: v.adversarial_check.verdict, survives: v.adversarial_check.survives_count, refuted: v.adversarial_check.refuted_count }
+          : null,
+      };
+    });
+    const nearMisses = auditEntries
+      .filter((entry) => entry.final === "near_miss")
+      .map((entry) => {
+        const v = verdictByIndex.get(entry.index)!;
+        const c = candidates[entry.index];
+        return {
+          title: entry.title,
+          url: entry.url,
+          excerpt: c.text.slice(0, AUDIT_EXCERPT_CHARS),
+          looked_genuine_because: v.pass1_justification ?? null,
+          rejected_because: (v.adversarial_check?.votes ?? [])
+            .filter((vote) => vote.verdict === "REFUTED")
+            .map((vote) => vote.justification)
+            .filter(Boolean),
+          vote: `${v.adversarial_check?.refuted_count ?? 0} of ${N_ADVERSARIAL_VOTERS} independent reviewers rejected it`,
+        };
+      });
+    const researchAudit = {
+      version: 1,
+      generated_at: new Date().toISOString(),
+      summary: {
+        retrieved: candidates.length,
+        cited: synthesis.citations.length,
+        genuine: genuineCandidates.length,
+        near_misses: nearMisses.length,
+        tangential: funnel.pass1_verdicts.tangential,
+        false_positive: funnel.pass1_verdicts.false_positive,
+        no_verdict: funnel.pass1_verdicts.no_verdict,
+      },
+      near_misses: nearMisses,
+      entries: auditEntries,
+    };
+
     await replaceSources(question.id, synthesis.citations);
     await patchQuestion(question.id, {
       status: "published",
@@ -440,6 +512,7 @@ async function researchQuestion(question: Question) {
       research_error: null,
       research_stage: null,
       research_funnel: funnel,
+      research_audit: researchAudit,
     });
     await queueQuestionImage(question.id);
 
