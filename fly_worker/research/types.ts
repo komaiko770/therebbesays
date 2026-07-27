@@ -45,6 +45,10 @@ export type Verdict = {
   index: number;
   verdict: "GENUINE" | "TANGENTIAL" | "FALSE_POSITIVE";
   justification: string;
+  // The original pass-1 justification, preserved BEFORE the adversarial-refutation
+  // rewrite mangles `justification` — the audit trail shows it as "why this passage
+  // was considered" (27 Jul rejection-audit feature).
+  pass1_justification?: string;
   source?: string;
   collection?: Collection;
   candidate?: Candidate;

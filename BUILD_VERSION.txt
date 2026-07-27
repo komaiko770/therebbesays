@@ -1,1 +1,1 @@
-2026-07-24T17:10Z v2: auth gate on, 770 preloader, source pills
+2026-07-27T01:30Z v3: rejection audit trail, near-miss passages in Research trail
