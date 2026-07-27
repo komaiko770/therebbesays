@@ -46,6 +46,12 @@
 //      MAX_CANDIDATE_CHARS before it can enter ANY prompt (reflection additionally
 //      caps per-passage length on its own — see analyzeQuestion.ts). Truncation is
 //      marked in the text so reviewers know they saw a prefix.
+//  10. FOOTNOTE LOCATOR (26 Jul): citation-route candidates now carry the footnote
+//      labels (corpus_citations.footnotes, via the updated lookup_citation_chunks
+//      RPC) whose definitions cite the asked-about verse/daf. replaceSources writes
+//      them into sources.original_source_detail ("Cited in footnote 25 of this
+//      passage"), which the site already renders in the citation tooltip and the
+//      Notes & sources list — no frontend change needed.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -66,7 +72,7 @@ type SourceRow = {
   publisher: string;
   host_publisher: string;
   original_source_title: null;
-  original_source_detail: null;
+  original_source_detail: string | null;
   citation_label: string;
   supporting_excerpt: string;
   source_type: string;
@@ -147,9 +153,19 @@ function sourceType(_url: string) {
   return "primary";
 }
 
+// Human-readable footnote locator (26 Jul): where in this passage the asked-about
+// verse/daf is cited. Rendered by the site wherever original_source_detail shows.
+function footnoteDetail(footnotes?: string[]): string | null {
+  const notes = (footnotes ?? []).map((n) => String(n).trim()).filter(Boolean);
+  if (!notes.length) return null;
+  return notes.length === 1
+    ? `Cited in footnote ${notes[0]} of this passage`
+    : `Cited in footnotes ${notes.join(", ")} of this passage`;
+}
+
 async function replaceSources(
   questionId: string,
-  citations: { url: string; title: string; cited_text: string }[],
+  citations: { url: string; title: string; cited_text: string; footnotes?: string[] }[],
 ) {
   const clear = await fetch(`${SUPABASE_URL}/rest/v1/sources?question_id=eq.${questionId}`, { method: "DELETE", headers: adminHeaders });
   if (!clear.ok) throw new Error(`Source reset failed: ${clear.status}`);
@@ -164,7 +180,7 @@ async function replaceSources(
       publisher: host,
       host_publisher: host,
       original_source_title: null,
-      original_source_detail: null,
+      original_source_detail: footnoteDetail(citation.footnotes),
       citation_label: `Source ${index + 1}`,
       supporting_excerpt: citation.cited_text.slice(0, 500),
       source_type: sourceType(citation.url),
