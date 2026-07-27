@@ -9,6 +9,14 @@
 //   2. retry transient failures (429/5xx/timeouts) with backoff,
 //   3. (text only) retry no-text/thinking-only responses with a doubled token
 //      budget, and join ALL text blocks instead of only taking the first.
+//
+// DEVARIM 6:5 POSTMORTEM (27 Jul): a truncated-but-NON-EMPTY text response slipped
+// straight through — the model burned most of the 5000-token budget reasoning, the
+// text block was cut off at max_tokens after 261 characters, and because `text` was
+// truthy the old code returned the fragment, which got PUBLISHED mid-sentence.
+// callClaudeText now treats stop_reason === "max_tokens" the same as no-text:
+// retry with a doubled budget. Only if every attempt is still truncated does it
+// return the longest fragment (with a loud error) rather than fail the whole run.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const REQUEST_TIMEOUT_MS = 240_000;
@@ -98,9 +106,10 @@ export async function callClaudeTool(
 }
 
 /** Plain text completion, no tool — used only by synthesize.ts for the final answer.
- * If the model returns no text (e.g. it burned the whole budget on a `thinking`
- * block, which is exactly how the simcha run died), retry with a doubled budget
- * instead of failing the run. */
+ * Retries with a doubled budget when the model returns no text (thinking-only — the
+ * simcha failure) OR truncated text (stop_reason max_tokens — the Devarim 6:5
+ * failure, where a 261-char mid-sentence fragment got published). Only returns a
+ * truncated fragment as a last resort, after every retry stayed truncated. */
 export async function callClaudeText(
   apiKey: string,
   model: string,
@@ -110,6 +119,7 @@ export async function callClaudeText(
 ): Promise<string> {
   let budget = maxTokens;
   let lastPayload: any = null;
+  let bestTruncated = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     const payload = await postAnthropic(apiKey, {
       model,
@@ -124,13 +134,28 @@ export async function callClaudeText(
       .map((b: any) => b.text)
       .join("\n")
       .trim();
-    if (text) return text;
 
-    console.warn(
-      `callClaudeText: no text in response (stop_reason=${payload.stop_reason}, budget=${budget}); ` +
-      `retrying with a larger budget…`,
-    );
+    if (text && payload.stop_reason !== "max_tokens") return text;
+
+    if (text) {
+      if (text.length > bestTruncated.length) bestTruncated = text;
+      console.warn(
+        `callClaudeText: response truncated at max_tokens (budget=${budget}, text=${text.length} chars); ` +
+        `retrying with a larger budget…`,
+      );
+    } else {
+      console.warn(
+        `callClaudeText: no text in response (stop_reason=${payload.stop_reason}, budget=${budget}); ` +
+        `retrying with a larger budget…`,
+      );
+    }
     budget = Math.min(budget * 2, 32000);
+  }
+  if (bestTruncated) {
+    console.error(
+      `callClaudeText: still truncated after 3 attempts; returning the longest fragment (${bestTruncated.length} chars) rather than failing the run`,
+    );
+    return bestTruncated;
   }
   throw new Error(`No text block in response after 3 attempts: ${JSON.stringify(lastPayload)}`);
 }
