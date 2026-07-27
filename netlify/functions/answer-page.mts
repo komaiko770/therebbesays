@@ -76,8 +76,9 @@ export default async (req: Request, context: Context) => {
   }
 
   const question = String(row.question || "").trim();
-  const title = `${questionTitle(question)} \u2014 The Rebbe / Index`;
-  // short_answer may be a raw markdown slice from older worker builds \u2014 strip BOTH
+  // Just the styled question — no "— The Rebbe / Index" suffix (owner request, 26 Jul).
+  const title = questionTitle(question);
+  // short_answer may be a raw markdown slice from older worker builds — strip BOTH
   // candidates, never trust either to be plain text.
   const rawDescription = stripMarkdown(String(row.short_answer || "")) || stripMarkdown(String(row.answer_markdown || "")).slice(0, 220);
   const description = rawDescription.length > 300 ? `${rawDescription.slice(0, 297)}\u2026` : rawDescription;
