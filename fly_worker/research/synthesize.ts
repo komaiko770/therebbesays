@@ -16,6 +16,14 @@
 // same numbering. This is more reliable than depending on the model to self-report
 // citations correctly, which matters given the "no human review" bar this pipeline is
 // held to.
+//
+// COLLECTION LABELS (26 Jul, owner report): the answer page groups sources into
+// Toras Menachem / Igros Kodesh tabs by matching the ENGLISH collection name in the
+// source title and the "### " subsection headings. The first Fly-worker answers wrote
+// Hebrew-only headings, so every source fell into the "More sources" tab. Both the
+// stored source titles and the prompt's required subsection titles now lead with the
+// English collection name (the site's nav labels strip that prefix for compactness —
+// briefNavLabel in app.js — so the menus stay clean).
 
 import { callClaudeText } from "./anthropicClient.ts";
 import type { Candidate } from "./types.ts";
@@ -39,10 +47,14 @@ function chabadLibraryUrl(sourceId: number): string {
   return `https://chabadlibrary.org/books/${sourceId}`;
 }
 
+export function collectionLabel(collection: Candidate["collection"]): string {
+  return collection === "toras_menachem" ? "Toras Menachem" : "Igros Kodesh";
+}
+
 function buildSynthesisPrompt(question: string, numberedSources: { n: number; c: Candidate }[]): string {
   const sourceBlocks = numberedSources.map(
     ({ n, c }) =>
-      `--- Source ${n} (${c.collection === "toras_menachem" ? "Toras Menachem" : "Igrot Kodesh"}) ---\n` +
+      `--- Source ${n} (${collectionLabel(c.collection)}) ---\n` +
       `${c.volume_heading} / ${c.item_heading}\nHebrew text:\n${c.text}\n`,
   );
   const sourcesText = sourceBlocks.join("\n");
@@ -67,7 +79,7 @@ Required structure:
 A concise synthesis of the Rebbe's position across these verified sources — recurring principles, meaningful differences in emphasis, practical direction. Synthesize; don't describe the research process.
 
 ## Source-by-source
-One subsection per source, titled with its volume/item heading. Under each, exactly these bullets:
+One subsection per source. Each subsection title MUST begin with the source's collection name in English exactly as given in its header above ("Toras Menachem" or "Igros Kodesh"), then a comma, then its volume/item heading — e.g. "### Toras Menachem, תשלא חלק שני — ...". Under each, exactly these bullets:
 - **What the Rebbe says about this topic:** the specific point, instruction, or framing in this source.
 - **What this source is generally about:** the broader talk/letter, occasion, or subject.
 - **How prominent the topic is:** Central, Substantial, Brief, or Incidental, with one short reason.
@@ -122,7 +134,9 @@ export async function synthesize(
 
   const citations: SynthesisCitation[] = numberedSources.map(({ c }) => ({
     url: chabadLibraryUrl(c.source_id),
-    title: `${c.volume_heading} / ${c.item_heading}`,
+    // Lead with the English collection name — the site's collection tabs (and the
+    // "More sources" fallback) group by matching this exact prefix.
+    title: `${collectionLabel(c.collection)}, ${c.volume_heading} / ${c.item_heading}`,
     cited_text: c.text.slice(0, 500),
     footnotes: c.footnotes,
   }));
