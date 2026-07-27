@@ -39,6 +39,11 @@
 // that extracts every (index, verdict) pair it can find; if salvage yields nothing,
 // the batch reports zero verdicts and flows into the existing retry-once path
 // instead of killing the whole question.
+//
+// REJECTION AUDIT TRAIL (27 Jul): the original pass-1 justification is now preserved
+// on the verdict (pass1_justification) BEFORE the refuted-rewrite mangles it, so the
+// per-question audit trail (index.ts -> questions.research_audit) can show "why this
+// passage was considered" alongside "why it was rejected".
 
 import { callClaudeTool } from "./anthropicClient.ts";
 import type { Candidate, RefutationResult, AdversarialVoteResult, Verdict, VerificationResult } from "./types.ts";
@@ -347,6 +352,9 @@ export async function verify(
     if (v.verdict !== "GENUINE") continue;
     const vote = voteByIndex.get(v.index)!;
     v.adversarial_check = vote;
+    // Preserve the clean pass-1 reasoning BEFORE any rewrite below — the audit trail
+    // (questions.research_audit) shows it as "why this passage was considered".
+    v.pass1_justification = v.justification;
     if (vote.verdict === "REFUTED") {
       v.verdict = "TANGENTIAL";
       v.justification = `[Pass 1: ${v.justification}] [REFUTED by ${vote.refuted_count}/${nVoters} adversarial reviewers]`;
