@@ -69,6 +69,21 @@
 //      excerpt, pass-1 reasoning, the refuting reviewers' reasons) that the site's
 //      Research trail tab shows publicly, so readers see what was reviewed and
 //      turned away — not just how much.
+//  14. SYNTHESIS SOURCE CAP (27 Jul, "talmidei chachamim" postmortem): a pg_cron
+//      watchdog (`recover-stale-rebbe-research`) resets any question stuck in
+//      `researching` for more than 15 minutes back to `queued` with
+//      "Research worker exceeded its processing window". A broad classic topic
+//      verified far more genuine sources than the synthesis budget could ever write
+//      about in one call — the required Source-by-source section grows linearly with
+//      source count, so an unbounded count has no token budget that both fits a
+//      single Anthropic call and finishes inside that 15-minute window. Genuine
+//      sources fed to synthesis are now capped at MAX_SYNTHESIS_SOURCES; anything
+//      genuine beyond the cap is recorded in the audit trail as
+//      `genuine_excluded_for_space` (verified real evidence, just not written up, as
+//      opposed to `tangential`/`false_positive` which were never genuine at all) so
+//      the honest coverage count isn't silently lost, only the write-up length is
+//      bounded. This is a real editorial choice (pick the strongest N), not a
+//      workaround — no reader benefits from a 40-subsection answer either.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -119,6 +134,15 @@ const adminHeaders = { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY
 // existed but only 30 could ever be considered; the cap itself was the coverage floor).
 const TOP_K_PER_COLLECTION = 60;
 const N_ADVERSARIAL_VOTERS = 3;
+
+// Hard cap on how many verified-GENUINE sources synthesis is asked to write about in a
+// single call ("talmidei chachamim" postmortem, 27 Jul, change 14). Paired with
+// synthesize.ts's 24000-token ceiling (4000 + 20*800 = 20000, comfortably under that),
+// so a maximally broad topic converges in ONE synthesis call instead of retrying its way
+// through the 15-minute processing-window watchdog. Sources beyond the cap are still
+// real, verified evidence — they're recorded in the audit trail as
+// genuine_excluded_for_space, not discarded from the record, just not written up.
+const MAX_SYNTHESIS_SOURCES = 20;
 
 // Monster-chunk guard ("Los Angeles" postmortem, 26 Jul): hard per-candidate text cap
 // applied before candidates reach any LLM prompt. 12K chars keeps ~99.5% of chunks
@@ -398,12 +422,21 @@ async function researchQuestion(question: Question) {
       N_ADVERSARIAL_VOTERS,
     );
 
-    const genuineCandidates = verified.verdicts
-      .filter((v) => v.verdict === "GENUINE")
-      .map((v) => v.candidate!)
-      .filter(Boolean);
+    // All verdicts that survived pass 1 + the adversarial vote — genuinely verified,
+    // real evidence. This can be an unbounded count for a broad topic.
+    const survivingGenuineVerdicts = verified.verdicts.filter((v) => v.verdict === "GENUINE");
 
-    // Step 5: write the final public answer from ONLY the verified genuine candidates.
+    // Cap what synthesis is actually asked to write about (change 14, "talmidei
+    // chachamim" postmortem) — an unbounded source count has no token budget that both
+    // fits one Anthropic call and finishes inside the 15-minute processing window.
+    // Sources beyond the cap are still genuinely verified; they're recorded in the
+    // audit trail as genuine_excluded_for_space rather than silently dropped.
+    const includedGenuineVerdicts = survivingGenuineVerdicts.slice(0, MAX_SYNTHESIS_SOURCES);
+    const includedIndices = new Set(includedGenuineVerdicts.map((v) => v.index));
+    const genuineCandidates = includedGenuineVerdicts.map((v) => v.candidate!).filter(Boolean);
+
+    // Step 5: write the final public answer from ONLY the verified genuine candidates
+    // that made the space cap.
     await setStage(question.id, "synthesizing");
     const synthesis = await synthesize(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question, genuineCandidates);
 
@@ -411,9 +444,11 @@ async function researchQuestion(question: Question) {
     // the question row so coverage problems are diagnosable instead of silent.
     const refutedVerdicts = verified.verdicts.filter((v) => v.adversarial_check?.verdict === "REFUTED");
     const refutedByVote = refutedVerdicts.length;
+    const genuineExcludedForSpace = survivingGenuineVerdicts.length - includedGenuineVerdicts.length;
     const funnel = {
       route: citationParsed.is_citation_lookup ? "citation" : "topical",
       top_k_per_collection: TOP_K_PER_COLLECTION,
+      max_synthesis_sources: MAX_SYNTHESIS_SOURCES,
       queries: funnelQueries,
       retrieved: {
         toras_menachem: retrievedByCollection.toras_menachem,
@@ -421,21 +456,31 @@ async function researchQuestion(question: Question) {
         total: candidates.length,
       },
       pass1_verdicts: {
-        genuine: genuineCandidates.length + refutedByVote,
+        genuine: survivingGenuineVerdicts.length + refutedByVote,
         tangential: verified.verdicts.filter((v) => v.verdict === "TANGENTIAL" && !v.adversarial_check).length,
         false_positive: verified.verdicts.filter((v) => v.verdict === "FALSE_POSITIVE").length,
         no_verdict: Math.max(0, candidates.length - verified.verdicts.length),
       },
-      genuine_pass1: genuineCandidates.length + refutedByVote,
+      genuine_pass1: survivingGenuineVerdicts.length + refutedByVote,
       refuted_by_adversarial_vote: refutedByVote,
       refuted_sources: refutedVerdicts.map((v) => v.source ?? "unknown"),
+      // Total genuine sources that survived verification, before the space cap.
+      genuine_verified_total: survivingGenuineVerdicts.length,
+      // Genuine sources actually fed to synthesis (after the space cap) — matches
+      // source_count / citations on the published answer.
       genuine_final: genuineCandidates.length,
+      genuine_excluded_for_space: genuineExcludedForSpace,
       cited: synthesis.citations.length,
     };
     console.log(`funnel ${question.id}:`, JSON.stringify(funnel));
 
     // REJECTION AUDIT TRAIL (change 13): per-candidate record of every verdict and
     // vote, plus display-ready near-miss detail for the site's Research trail tab.
+    // (change 14): a GENUINE verdict that was cut for space, not rejected, gets its
+    // own "genuine_excluded_for_space" disposition — distinct from tangential/
+    // false_positive (never genuine) and from near_miss (genuine but adversarially
+    // refuted) — so the audit stays honest about what was actually wrong with each
+    // passage vs. what simply didn't fit in this answer.
     const verdictByIndex = new Map(verified.verdicts.map((v) => [v.index, v]));
     const auditEntries = candidates.map((c, i) => {
       const v = verdictByIndex.get(i);
@@ -445,7 +490,7 @@ async function researchQuestion(question: Question) {
         : refuted
         ? "near_miss"
         : v.verdict === "GENUINE"
-        ? "cited"
+        ? (includedIndices.has(i) ? "cited" : "genuine_excluded_for_space")
         : v.verdict === "TANGENTIAL"
         ? "tangential"
         : "false_positive";
@@ -487,6 +532,7 @@ async function researchQuestion(question: Question) {
         retrieved: candidates.length,
         cited: synthesis.citations.length,
         genuine: genuineCandidates.length,
+        genuine_excluded_for_space: genuineExcludedForSpace,
         near_misses: nearMisses.length,
         tangential: funnel.pass1_verdicts.tangential,
         false_positive: funnel.pass1_verdicts.false_positive,
