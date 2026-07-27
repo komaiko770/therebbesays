@@ -56,6 +56,12 @@
 //      a raw slice of the answer markdown, so share previews and cards led with
 //      "## Synthesis across the sources". It is now a plain-text excerpt with heading
 //      lines, [^N] markers, and markdown syntax stripped.
+//  12. ANSWER-READY EMAIL (26 Jul, owner report): questions.asked_by_email was being
+//      recorded on submit, but NOTHING ever sent the notification — no edge function,
+//      no worker code. On publish, the worker now emails the asker via the Resend API
+//      (same verified noreply@therebbesays.com domain the auth emails use) and stamps
+//      questions.answer_email_sent_at so re-runs never double-send. Best-effort:
+//      requires the RESEND_API_KEY Fly secret; a send failure never fails the publish.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -67,7 +73,15 @@ import { verify } from "./verify.ts";
 import { synthesize } from "./synthesize.ts";
 import type { Candidate } from "./types.ts";
 
-type Question = { id: string; question: string; status: string; research_attempts: number };
+type Question = {
+  id: string;
+  question: string;
+  status: string;
+  research_attempts: number;
+  slug: string | null;
+  asked_by_email: string | null;
+  answer_email_sent_at: string | null;
+};
 type SourceRow = {
   question_id: string;
   ordinal: number;
@@ -88,6 +102,8 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const SITE_ORIGIN = Deno.env.get("SITE_ORIGIN") || "https://therebbesays.com";
 const adminHeaders = { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" };
 
 // Retrieval/verification tuning. TOP_K_PER_COLLECTION history: 15 (full_pipeline_test.py
@@ -130,7 +146,7 @@ function response(body: unknown, status = 200) {
 }
 
 async function getQuestion(id: string): Promise<Question | null> {
-  const params = new URLSearchParams({ select: "id,question,status,research_attempts", id: `eq.${id}`, limit: "1" });
+  const params = new URLSearchParams({ select: "id,question,status,research_attempts,slug,asked_by_email,answer_email_sent_at", id: `eq.${id}`, limit: "1" });
   const result = await fetch(`${SUPABASE_URL}/rest/v1/questions?${params}`, { headers: adminHeaders });
   if (!result.ok) throw new Error(`Question lookup failed: ${result.status}`);
   const rows = await result.json();
@@ -164,6 +180,42 @@ async function queueQuestionImage(id: string) {
   });
   if (!result.ok && result.status !== 409) console.error(`Image queue failed: ${result.status} ${await result.text()}`);
   return result.ok;
+}
+
+const escapeHtml = (value = "") => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+// Answer-ready notification (change 12). Best-effort: logs and returns false on any
+// failure; NEVER throws — the publish must survive a broken email path.
+async function sendAnswerReadyEmail(question: Question): Promise<boolean> {
+  if (!RESEND_API_KEY) { console.error("answer email skipped: RESEND_API_KEY not set"); return false; }
+  const to = (question.asked_by_email || "").trim();
+  if (!to || !question.slug) return false;
+  const answerUrl = `${SITE_ORIGIN}/answer/${encodeURIComponent(question.slug)}`;
+  const q = escapeHtml(question.question.trim());
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${RESEND_API_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: "The Rebbe Says <noreply@therebbesays.com>",
+        to: [to],
+        subject: `Your answer is ready — ${question.question.trim()}`,
+        html:
+          `<div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a;">` +
+          `<p style="font-size:15px;">The research you requested has finished compiling:</p>` +
+          `<p style="font-size:19px;font-weight:bold;margin:16px 0;">“${q}”</p>` +
+          `<p><a href="${answerUrl}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:6px;font-size:15px;">Read the answer</a></p>` +
+          `<p style="font-size:13px;color:#666;">Or open this link: <a href="${answerUrl}">${answerUrl}</a></p>` +
+          `<p style="font-size:12px;color:#999;margin-top:28px;">Every answer is compiled only from the Rebbe’s own published talks and letters (Toras Menachem and Igros Kodesh), with each claim tied to its source.</p>` +
+          `</div>`,
+      }),
+    });
+    if (!res.ok) { console.error(`answer email failed: ${res.status} ${await res.text()}`); return false; }
+    return true;
+  } catch (error) {
+    console.error("answer email failed:", error);
+    return false;
+  }
 }
 
 function sourceType(_url: string) {
@@ -390,6 +442,20 @@ async function researchQuestion(question: Question) {
       research_funnel: funnel,
     });
     await queueQuestionImage(question.id);
+
+    // Answer-ready email (change 12) — after the publish is safely saved, only if the
+    // asker left an email and this question has never been emailed about before.
+    if (question.asked_by_email && !question.answer_email_sent_at) {
+      const fresh = await getQuestion(question.id);
+      if (fresh && (await sendAnswerReadyEmail(fresh))) {
+        await setStage(question.id, null); // no-op keep-alive ordering guard
+        try {
+          await patchQuestion(question.id, { answer_email_sent_at: new Date().toISOString() });
+        } catch (error) {
+          console.error("answer_email_sent_at stamp failed:", error);
+        }
+      }
+    }
   } catch (error) {
     console.error(error);
     const message = error instanceof Error ? error.message.slice(0, 500) : "Research failed";
