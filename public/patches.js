@@ -796,10 +796,20 @@ if (feedList) {
       btn.type = 'button';
       btn.textContent = 'Research trail';
       bar.appendChild(btn);
-      // stopPropagation (defensive, 27 Jul): keeps this click fully isolated from
-      // any other delegated listener on an ancestor of the tab bar.
-      btn.addEventListener('click', (event) => { event.stopPropagation(); openTrail(bar, tabs, btn, panel); });
-      tabs.forEach((t) => t.addEventListener('click', (event) => { event.stopPropagation(); closeTrail(btn); }));
+      // DEAD-TAB POSTMORTEM (owner report, 27 Jul: "can't tap Toras Menachem,
+      // Igros Kodesh, or Research trail"). Both listeners below used to call
+      // event.stopPropagation() as a "defensive" guard. That was the bug:
+      // app.js switches answer tabs from a DELEGATED listener on `document`, so
+      // stopping propagation at the button meant the click never reached it and
+      // the collection tabs silently stopped switching panels on every answer
+      // where this trail tab mounts — desktop and mobile alike. Let the clicks
+      // bubble. The trail button is safe to let through because its
+      // data-answer-tab attribute was stripped above, so app.js's handler
+      // ignores it; and closeTrail must run ALONGSIDE app.js's panel switch,
+      // not instead of it (this listener fires first, then app.js unhides the
+      // requested panel). Never reintroduce stopPropagation here.
+      btn.addEventListener('click', () => openTrail(bar, tabs, btn, panel));
+      tabs.forEach((t) => t.addEventListener('click', () => closeTrail(btn)));
     } finally {
       ensureTabInFlight = false;
     }
