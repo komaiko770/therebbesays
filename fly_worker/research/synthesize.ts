@@ -32,6 +32,18 @@
 // got published. The budget now scales with the number of verified sources (and
 // anthropicClient additionally retries any truncated response with a doubled budget
 // instead of returning the fragment).
+//
+// TALMIDEI CHACHAMIM POSTMORTEM (27 Jul): a broad classic topic verified far more than
+// 20 genuine sources. Under the OLD flat 16000-token ceiling, the required Source-by-
+// source section for that many sources couldn't fit even after doubling the budget
+// through every retry in anthropicClient — synthesis kept truncating, kept retrying,
+// and burned the whole 15-minute pipeline window (see index.ts's MAX_SYNTHESIS_SOURCES)
+// before the sweeper reset the question back to queued. The real fix is capping HOW
+// MANY verified sources synthesis is asked to write about at all (index.ts), not just
+// raising the budget further — an unbounded source count has no token budget that both
+// fits a single call and finishes inside the processing window. This file's budget
+// ceiling is raised only enough to comfortably cover that fixed source cap in one
+// attempt (4000 + 20 sources × 800 = 20000), not to chase an unbounded source count.
 
 import { callClaudeText } from "./anthropicClient.ts";
 import type { Candidate } from "./types.ts";
@@ -103,6 +115,10 @@ Aim for roughly 400-800 words (shorter is fine if the verified material is thin 
  * genuine sources, there is nothing to synthesize, and skipping the LLM call removes any
  * chance of it inventing content to fill the gap (exactly the failure mode the whole
  * verification stage exists to prevent).
+ *
+ * Callers (index.ts) are responsible for capping `verifiedCandidates` to a sane count
+ * before calling this — see MAX_SYNTHESIS_SOURCES there. This function scales its
+ * budget to whatever count it's actually given, but does not itself bound that count.
  */
 export async function synthesize(
   apiKey: string,
@@ -126,11 +142,13 @@ export async function synthesize(
   const numberedSources = verifiedCandidates.map((c, i) => ({ n: i + 1, c }));
   const prompt = buildSynthesisPrompt(question, numberedSources);
   const system = "You are a careful direct-source research editor. The Rebbe's own words, as given to you, are the evidence; you add no outside claims.";
-  // Budget scales with the verified source count ("Devarim 6:5" postmortem, 27 Jul):
-  // the mandatory Source-by-source section grows linearly with sources — a flat 5000
-  // truncated a 12-source answer mid-sentence. ~800 tokens per source on top of a
-  // 4000 base keeps small answers cheap and 12-source answers whole; 16000 cap.
-  const synthesisBudget = Math.min(16000, 4000 + numberedSources.length * 800);
+  // Budget scales with the verified source count ("Devarim 6:5" postmortem, 27 Jul).
+  // Ceiling raised from 16000 -> 24000 ("talmidei chachamim" postmortem, 27 Jul) so a
+  // full MAX_SYNTHESIS_SOURCES-sized answer (index.ts caps at 20: 4000 + 20*800 =
+  // 20000) fits in ONE call instead of relying on anthropicClient's truncation-retry
+  // loop to get there — that loop exists as a safety net for genuine surprises, not as
+  // the normal path for a predictably-sized request.
+  const synthesisBudget = Math.min(24000, 4000 + numberedSources.length * 800);
   const text = await callClaudeText(apiKey, model, prompt, system, synthesisBudget);
 
   const topicMatch = text.match(/TOPICS:\s*([^\n]+)/i);
