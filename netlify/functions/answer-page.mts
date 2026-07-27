@@ -7,13 +7,38 @@ const escapeHtml = (value = "") => value.replace(/[&<>"']/g, c => ({ "&":"&amp;"
 
 const stripMarkdown = (value = "") => value
   .replace(/```[\s\S]*?```/g, " ")
-  .replace(/^#{1,6}\s+/gm, "")
+  // Drop heading LINES entirely (not just the # marks): "## Synthesis across the
+  // sources" is pipeline scaffolding, not a share-card description (owner, 26 Jul).
+  .replace(/(^|\n)#{1,6}[^\n]*/g, " ")
+  .replace(/\[\^\d+\]/g, " ")
   .replace(/\*\*([^*]+)\*\*/g, "$1")
   .replace(/\*([^*]+)\*/g, "$1")
   .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
   .replace(/[>_`~]/g, "")
   .replace(/\s+/g, " ")
   .trim();
+
+// Mirror the site's question styling (app.js questionText/titleCaseTopic) so the share
+// card reads "What does the Rebbe say about Chabad on Campus?" instead of the raw
+// lowercase question text (owner, 26 Jul).
+const topicText = (value = "") => value
+  .replace(/^what (?:did|does) (?:the )?rebbe say about\s+/i, "")
+  .replace(/[?.!]+$/, "")
+  .trim();
+const titleCaseTopic = (value = "") => {
+  const small = new Set(["a","an","the","and","but","or","for","nor","on","at","to","from","by","of","in","with","about","over"]);
+  const words = String(value || "").trim().split(/\s+/);
+  return words.map((word, index) => {
+    if (/^[A-Z0-9]{2,}$/.test(word)) return word;
+    const lower = word.toLowerCase();
+    if ((index === 0 || index < words.length - 1) && small.has(lower)) return lower;
+    return lower.replace(/(^|[-'\u2019])([a-z])/g, (_m, lead, char) => lead + char.toUpperCase());
+  }).join(" ");
+};
+const questionTitle = (value = "") => {
+  const topic = titleCaseTopic(topicText(value));
+  return topic ? `What does the Rebbe say about ${topic}?` : String(value || "").trim();
+};
 
 export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
@@ -51,9 +76,11 @@ export default async (req: Request, context: Context) => {
   }
 
   const question = String(row.question || "").trim();
-  const title = `${question} — What does the Rebbe say?`;
-  const rawDescription = String(row.short_answer || "").trim() || stripMarkdown(String(row.answer_markdown || "")).slice(0, 220);
-  const description = rawDescription.length > 300 ? `${rawDescription.slice(0, 297)}…` : rawDescription;
+  const title = `${questionTitle(question)} \u2014 The Rebbe / Index`;
+  // short_answer may be a raw markdown slice from older worker builds \u2014 strip BOTH
+  // candidates, never trust either to be plain text.
+  const rawDescription = stripMarkdown(String(row.short_answer || "")) || stripMarkdown(String(row.answer_markdown || "")).slice(0, 220);
+  const description = rawDescription.length > 300 ? `${rawDescription.slice(0, 297)}\u2026` : rawDescription;
   const pageUrl = `${origin}/answer/${encodeURIComponent(row.slug)}`;
   const image = String(row.image_url || `${origin}/images/rebbe-portrait-close.png`);
 
@@ -78,8 +105,8 @@ export default async (req: Request, context: Context) => {
     "@type": "QAPage",
     mainEntity: {
       "@type": "Question",
-      name: question,
-      text: question,
+      name: questionTitle(question),
+      text: questionTitle(question),
       dateCreated: row.created_at || undefined,
       acceptedAnswer: {
         "@type": "Answer",
