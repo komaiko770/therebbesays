@@ -84,6 +84,15 @@
 //      the honest coverage count isn't silently lost, only the write-up length is
 //      bounded. This is a real editorial choice (pick the strongest N), not a
 //      workaround — no reader benefits from a 40-subsection answer either.
+//  15. LIVE PIPELINE DETAIL (27 Jul, owner video): the preloader only ever showed
+//      which STAGE was running, never any real output from a completed stage. The
+//      owner asked to see the actual generated search terms once "Analyzing your
+//      question" finishes, and the retrieved/verified counts once their stages
+//      finish. `research_progress` (new jsonb column) is patched incrementally
+//      DURING the run — after query generation, after retrieval, and after
+//      verification — building on itself each time (unlike `research_funnel`, which
+//      is only ever written once, atomically, at the very end). The site reads it on
+//      the same poll it already uses for `research_stage`.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -161,8 +170,8 @@ function capCandidateTexts(list: Candidate[]): Candidate[] {
 // Hebrew excerpt length for near-miss display on the site (rejection audit, 27 Jul).
 const AUDIT_EXCERPT_CHARS = 400;
 
-// Plain-text excerpt for cards and share previews: heading lines, [^N] citation
-// markers, and markdown syntax stripped, whitespace collapsed (change 11).
+// Plain-text excerpt for cards and share previews: heading lines, [^N] markers, and
+// markdown syntax stripped, whitespace collapsed (change 11).
 function plainExcerpt(markdown: string, maxChars = 280): string | null {
   const text = String(markdown || "")
     .replace(/(^|\n)#{1,6}[^\n]*/g, " ")
@@ -203,6 +212,20 @@ async function setStage(id: string, stage: string | null) {
     await patchQuestion(id, { research_stage: stage });
   } catch (error) {
     console.error(`stage update failed (${stage}):`, error);
+  }
+}
+
+// Best-effort incremental progress reporting for the preloader (change 15, 27 Jul).
+// Unlike research_funnel (written once, atomically, at completion), research_progress
+// accumulates DURING the run so the preloader can show real output — generated search
+// terms, retrieved counts, verified counts — the moment each stage actually finishes,
+// not just which stage is active. Never throws: a lost progress update must not kill
+// the research task itself, and must never delay it either.
+async function setProgress(id: string, progress: Record<string, unknown>) {
+  try {
+    await patchQuestion(id, { research_progress: progress });
+  } catch (error) {
+    console.error("progress update failed:", error);
   }
 }
 
@@ -298,7 +321,10 @@ async function replaceSources(
 async function researchQuestion(question: Question) {
   if (!ANTHROPIC_API_KEY) { await patchQuestion(question.id, { research_error: "Awaiting ANTHROPIC_API_KEY" }); return; }
   const attempt = (question.research_attempts || 0) + 1;
-  await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing" });
+  await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing", research_progress: null });
+  // Accumulates across the whole run — each setProgress() call below sends the WHOLE
+  // object so far, since research_progress is replaced (not merged) on PATCH.
+  const progress: Record<string, unknown> = {};
   try {
     // Step 0: decide citation vs. topical BEFORE doing anything else — one small,
     // cheap classification call. A genuinely topical question (the vast majority)
@@ -312,6 +338,8 @@ async function researchQuestion(question: Question) {
 
     if (citationParsed.is_citation_lookup) {
       // Citation route: direct, precise lookup first.
+      progress.search_terms = { citation_key: citationParsed.normalized_key };
+      await setProgress(question.id, progress);
       await setStage(question.id, "retrieving");
       candidates = await lookupCitationChunks(SUPABASE_URL, adminHeaders, citationParsed.normalized_key, TOP_K_PER_COLLECTION);
       topicGuidance =
@@ -358,6 +386,12 @@ async function researchQuestion(question: Question) {
           fallback_hebrew_query: analysis.hebrew_query,
           fallback_alt_queries: analysis.alt_queries ?? [],
         };
+        progress.search_terms = {
+          citation_key: citationParsed.normalized_key,
+          fallback_hebrew_query: analysis.hebrew_query,
+          fallback_alt_queries: analysis.alt_queries ?? [],
+        };
+        await setProgress(question.id, progress);
       }
 
       // Monster-chunk guard — cap BEFORE any prompt sees these.
@@ -367,11 +401,23 @@ async function researchQuestion(question: Question) {
         toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
         igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
       };
+      progress.retrieved = { total: candidates.length, ...retrievedByCollection };
+      await setProgress(question.id, progress);
     } else {
       // Topical route — unchanged.
       // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
       const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
       const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
+
+      // Progress (change 15): the generated search terms are the real output of the
+      // "Analyzing your question" stage — written the moment it's known, BEFORE
+      // retrieval starts, so the preloader can show it as soon as that stage exits.
+      progress.search_terms = {
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
+      await setProgress(question.id, progress);
 
       // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
       await setStage(question.id, "retrieving");
@@ -388,6 +434,15 @@ async function researchQuestion(question: Question) {
       // ("Los Angeles" postmortem: uncapped keyword hits blew the 1M-token API limit).
       candidates = capCandidateTexts(candidates);
 
+      retrievedByCollection = {
+        toras_menachem: byCollection.toras_menachem?.length ?? 0,
+        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
+      };
+      // Progress (change 15): retrieved counts are the real output of the
+      // "Searching..." stage — written the moment retrieval finishes.
+      progress.retrieved = { total: candidates.length, ...retrievedByCollection };
+      await setProgress(question.id, progress);
+
       // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
       await setStage(question.id, "reflecting");
       const reflection = await reflectOnCandidates(
@@ -402,10 +457,6 @@ async function researchQuestion(question: Question) {
         hebrew_query: analysis.hebrew_query,
         alt_queries: analysis.alt_queries ?? [],
         keyword_terms: analysis.keyword_terms,
-      };
-      retrievedByCollection = {
-        toras_menachem: byCollection.toras_menachem?.length ?? 0,
-        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
       };
     }
 
@@ -425,6 +476,15 @@ async function researchQuestion(question: Question) {
     // All verdicts that survived pass 1 + the adversarial vote — genuinely verified,
     // real evidence. This can be an unbounded count for a broad topic.
     const survivingGenuineVerdicts = verified.verdicts.filter((v) => v.verdict === "GENUINE");
+
+    // Progress (change 15): verified/rejected counts are the real output of the
+    // "Verifying every source" stage — written the moment verification finishes,
+    // before synthesis begins.
+    progress.verified = {
+      genuine: survivingGenuineVerdicts.length,
+      rejected: Math.max(0, candidates.length - survivingGenuineVerdicts.length),
+    };
+    await setProgress(question.id, progress);
 
     // Cap what synthesis is actually asked to write about (change 14, "talmidei
     // chachamim" postmortem) — an unbounded source count has no token budget that both
@@ -557,6 +617,7 @@ async function researchQuestion(question: Question) {
       completed_at: new Date().toISOString(),
       research_error: null,
       research_stage: null,
+      research_progress: null,
       research_funnel: funnel,
       research_audit: researchAudit,
     });
