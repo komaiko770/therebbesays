@@ -4,6 +4,20 @@
 // prototype for the full design rationale; this is a faithful line-for-line port of its
 // prompts, not a re-derivation, since those prompts were iterated on against real test
 // questions and changing wording here would forfeit that validation.
+//
+// COMPUTERS POSTMORTEM (27 Jul): a narrow technology question ("computers") produced
+// wildly unstable retrieval across two runs on the identical corpus — one run's
+// alt_queries found a single genuine passage via "electronic brain for halachic
+// calculation" phrasing, a second run's alt_queries (different phrasing, same topic)
+// missed that exact passage entirely and found zero. A single named technology/device
+// is too narrow a target for embedding search alone: real primary sources almost never
+// use the modern named term, and the Rebbe's actual engagement with "computers" lives
+// inside the broader universe of automation, electronic devices, calculating machines,
+// and radio/broadcast technology of his era — not literal keystrokes about "מחשב".
+// Both the query-generation guidance below and the topic_guidance instructions now
+// explicitly require covering that broader technological neighborhood, not just the
+// literal named device, so retrieval and verification stop depending on which random
+// phrasing the model happens to pick that run.
 
 import { callClaudeTool } from "./anthropicClient.ts";
 import type { QuestionAnalysis } from "./types.ts";
@@ -20,15 +34,15 @@ const ANALYZE_TOOL = {
       },
       alt_hebrew_queries: {
         type: "string",
-        description: "1-3 ADDITIONAL Hebrew query sentences, joined with a pipe character, each approaching the question from a genuinely DIFFERENT angle or facet than the main hebrew_query (e.g. for a place: the Jewish community there, the Rebbe's guidance to its institutions and emissaries, historical events involving it). Each one is used for its own embedding search, so semantic diversity matters more than polish. Leave empty only if the question is so narrow that no genuinely different angle exists.",
+        description: "1-3 ADDITIONAL Hebrew query sentences, joined with a pipe character, each approaching the question from a genuinely DIFFERENT angle or facet than the main hebrew_query (e.g. for a place: the Jewish community there, the Rebbe's guidance to its institutions and emissaries, historical events involving it; for a named technology: the era's closest analogous/predecessor technology, and the Rebbe's broader approach to science and technological progress). Each one is used for its own embedding search, so semantic diversity matters more than polish. Leave empty only if the question is so narrow that no genuinely different angle exists — this should be rare; almost every topic has multiple real angles.",
       },
       keyword_terms: {
         type: "string",
-        description: "3-6 specific Hebrew terms/phrases likely to appear verbatim in a genuine primary source, joined with a pipe character, e.g. 'תורה עם דרך ארץ|אורתודוקסיה מודרנית|תורה ומדע'. Prefer specific multi-word phrases over generic single words — a generic single word (e.g. a common root that also means something unrelated) causes massive false-positive noise.",
+        description: "3-6 specific Hebrew terms/phrases likely to appear verbatim in a genuine primary source, joined with a pipe character, e.g. 'תורה עם דרך ארץ|אורתודוקסיה מודרנית|תורה ומדע'. Prefer specific multi-word phrases over generic single words — a generic single word (e.g. a common root that also means something unrelated) causes massive false-positive noise. For a named technology/invention, include BOTH the literal modern term AND at least 2-3 terms for the era's closest analogous or predecessor technology (e.g. for computers: electronic brain / calculating machine / automated device terminology) — the Rebbe's actual sources overwhelmingly use period-appropriate technical vocabulary, not the modern loanword.",
       },
       topic_guidance: {
         type: "string",
-        description: "Scope clarification for a verification panel reviewing candidate passages: what exactly counts as genuinely on-topic vs. merely superficially similar for THIS specific question. Explicitly name any classical/ancient concepts that use similar terminology but mean something different (false-friend risk), and any historical predecessor movements/concepts that should count as the SAME underlying topic even if not identically named. Be concrete and specific to this question, not generic.",
+        description: "Scope clarification for a verification panel reviewing candidate passages: what exactly counts as genuinely on-topic vs. merely superficially similar for THIS specific question. Explicitly name any classical/ancient concepts that use similar terminology but mean something different (false-friend risk), and any historical predecessor movements/concepts/technologies that should count as the SAME underlying topic even if not identically named. For a named technology or invention specifically, explicitly state which adjacent/related technologies from the same technological family or era (e.g. automation, broadcasting, calculating machines, electronic devices generally) should count as genuinely on-topic rather than being rejected as merely 'similar but different tech' — narrow literalism here throws away the Rebbe's actual engagement with the underlying question. Be concrete and specific to this question, not generic.",
       },
     },
     required: ["hebrew_query", "keyword_terms", "topic_guidance"],
@@ -45,7 +59,8 @@ Before any retrieval happens, think carefully about how this question could go w
 - Does this question's topic have a name, term, or phrase that is ALSO used in a completely different, unrelated sense elsewhere in Rabbinic literature (a "false friend")? If so, name it explicitly so a reviewer doesn't get fooled by surface overlap.
 - Does this question name something (an ideology, institution, technology, event) that has historical predecessors, earlier names, or a closely related phenomenon that SHOULD count as the same underlying question even though it isn't identically named? If so, say so explicitly, so genuine evidence doesn't get wrongly excluded on a technicality of naming.
 - If the question names an abstract movement/ideology: real primary sources (personal letters especially) almost never discuss abstract ideologies by name — they address concrete individual situations. Genuine evidence often looks like a specific real-world case that instantiates the same underlying tension, not a philosophical discussion of the movement itself.
-- Broad or multi-faceted topics (a country, a community, a practice, a person) are discussed from MANY different angles across thousands of letters and talks. A single embedding query only finds one semantic neighborhood. Write 1-3 alternate Hebrew queries that each target a genuinely different facet of the topic, so retrieval covers more of what actually exists.
+- If the question names a specific modern TECHNOLOGY or INVENTION (e.g. "computers", "television"): a single literal search for the modern device name is dangerously narrow and produces unstable results run to run. Real sources from this era discuss the underlying technological family in period vocabulary — electronic devices, automation, calculating machines, broadcasting — often without ever naming the specific modern device. At least one alt_hebrew_query and several keyword_terms MUST target this broader technological neighborhood, not just the literal device name, and topic_guidance must explicitly authorize crediting that adjacent material as genuine engagement with the question.
+- Broad or multi-faceted topics (a country, a community, a practice, a person, a technology) are discussed from MANY different angles across thousands of letters and talks. A single embedding query only finds one semantic neighborhood. Write 1-3 alternate Hebrew queries that each target a genuinely different facet of the topic, so retrieval covers more of what actually exists.
 
 Call report_analysis with your Hebrew query, alternate queries, keyword terms, and topic guidance.`;
 }
