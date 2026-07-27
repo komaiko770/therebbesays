@@ -104,13 +104,27 @@ const REFLECT_TOOL = {
   },
 };
 
+// Reflection reads the WHOLE candidate pool in a single prompt — the only pipeline
+// call that does — so it gets its own tighter per-passage cap on top of the worker's
+// global MAX_CANDIDATE_CHARS guard ("Los Angeles" postmortem, 26 Jul: an uncapped
+// pool with monster chunks produced a 1.55M-token prompt, over the API's 1M limit).
+// Reflection looks for cross-candidate terminology patterns, not exhaustive readings,
+// so a generous prefix of each passage is enough. Worst case: 120 candidates × 3.5K
+// chars ≈ 420K chars — comfortably inside the limit.
+const REFLECT_SNIPPET_CHARS = 3500;
+
 function buildReflectPrompt(
   question: string,
   originalGuidance: string,
   candidates: { collection: string; volume_heading: string; item_heading: string; text: string }[],
 ): string {
   const candidateBlocks = candidates.map(
-    (c, i) => `--- Candidate ${i} (${c.collection}, ${c.volume_heading} / ${c.item_heading}) ---\n${c.text}\n`,
+    (c, i) => {
+      const text = c.text.length > REFLECT_SNIPPET_CHARS
+        ? c.text.slice(0, REFLECT_SNIPPET_CHARS) + "\n…[truncated for reflection — the verification pass sees more of this passage]"
+        : c.text;
+      return `--- Candidate ${i} (${c.collection}, ${c.volume_heading} / ${c.item_heading}) ---\n${text}\n`;
+    },
   );
   const candidatesText = candidateBlocks.join("\n");
 

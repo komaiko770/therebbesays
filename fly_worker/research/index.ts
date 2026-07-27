@@ -370,7 +370,7 @@ Deno.serve({ port: RESEARCH_PORT, hostname: "127.0.0.1" }, async (req: Request) 
   if (!question) return response({ error: "Question not found" }, 404);
   if (question.status === "published") {
     const accepted = await queueQuestionImage(question.id);
-    return response({ accepted, status: accepted ? "image_queued" : "image_not_queued" }, accepted ? 409 : 409);
+    return response({ accepted, status: accepted ? "image_queued" : "image_not_queued" }, accepted ? 202 : 409);
   }
   if (!ANTHROPIC_API_KEY) { await patchQuestion(question.id, { research_error: "Awaiting ANTHROPIC_API_KEY" }); return response({ accepted: false, status: "awaiting_api_key" }, 503); }
   if (!["queued", "failed"].includes(question.status) || question.research_attempts >= 2) return response({ accepted: false, status: question.status }, 409);
