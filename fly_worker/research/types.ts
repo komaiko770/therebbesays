@@ -17,6 +17,9 @@ export type Candidate = {
   signals: string[];
   semantic_score?: number;
   keyword_hits?: number;
+  // Footnote labels (e.g. ["25", "31"]) in this chunk whose definitions cite the
+  // asked-about verse/daf. Present only on citation-route candidates (26 Jul).
+  footnotes?: string[];
 };
 
 export type QuestionAnalysis = {
