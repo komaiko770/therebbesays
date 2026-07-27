@@ -24,6 +24,14 @@
 // stored source titles and the prompt's required subsection titles now lead with the
 // English collection name (the site's nav labels strip that prefix for compactness —
 // briefNavLabel in app.js — so the menus stay clean).
+//
+// TOKEN BUDGET SCALES WITH SOURCES (27 Jul, "Devarim 6:5" postmortem): that answer
+// verified 12 genuine sources, but synthesis ran with a flat 5000-token budget — the
+// required Source-by-source section alone (12 subsections × 3 cited bullets) plus
+// model reasoning blew straight through it, and a 261-character mid-sentence fragment
+// got published. The budget now scales with the number of verified sources (and
+// anthropicClient additionally retries any truncated response with a doubled budget
+// instead of returning the fragment).
 
 import { callClaudeText } from "./anthropicClient.ts";
 import type { Candidate } from "./types.ts";
@@ -118,7 +126,12 @@ export async function synthesize(
   const numberedSources = verifiedCandidates.map((c, i) => ({ n: i + 1, c }));
   const prompt = buildSynthesisPrompt(question, numberedSources);
   const system = "You are a careful direct-source research editor. The Rebbe's own words, as given to you, are the evidence; you add no outside claims.";
-  const text = await callClaudeText(apiKey, model, prompt, system, 5000);
+  // Budget scales with the verified source count ("Devarim 6:5" postmortem, 27 Jul):
+  // the mandatory Source-by-source section grows linearly with sources — a flat 5000
+  // truncated a 12-source answer mid-sentence. ~800 tokens per source on top of a
+  // 4000 base keeps small answers cheap and 12-source answers whole; 16000 cap.
+  const synthesisBudget = Math.min(16000, 4000 + numberedSources.length * 800);
+  const text = await callClaudeText(apiKey, model, prompt, system, synthesisBudget);
 
   const topicMatch = text.match(/TOPICS:\s*([^\n]+)/i);
   const topics = [
