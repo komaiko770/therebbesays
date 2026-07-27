@@ -92,3 +92,22 @@ footer{margin-top:22px;padding:27px;border-top:1px solid var(--line);text-align:
    sources backing an answer is the product's proof — show it on every published
    feed card and in the answer header meta. */
 .card-sources{color:var(--gold);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+
+/* Mobile share placement (owner report, 27 Jul): on phones the sharing options
+   were rendering at the BOTTOM of the article again. Cause: the share panel
+   lives inside .modal-topic-rail, which is the second child of .modal-layout;
+   below 760px the two-column grid collapses to one column, so the whole rail —
+   share icons included — stacked after the entire answer body.
+   Fix, mobile only: `display:contents` dissolves the rail's own box so its two
+   blocks become direct children of the modal column. The share panel is ordered
+   FIRST (top of the answer, under the hero/close row) while "Topics in this
+   answer" keeps its place at the end. Desktop is untouched — the sticky
+   right-hand rail is unchanged above 760px. */
+@media(max-width:760px){
+  .modal-layout{display:flex;flex-direction:column;gap:0}
+  .modal-layout>.modal-answer-main{order:0}
+  .modal-topic-rail{display:contents}
+  .modal-topic-rail>.share-panel{order:-1;margin:0 0 18px;padding:0 0 15px;border-bottom:1px solid var(--line);text-align:left}
+  .modal-topic-rail>.share-panel .share-actions{justify-content:flex-start}
+  .modal-topic-rail>.topic-rail-block{order:1;margin:0;padding:22px 0 0;border-top:1px solid var(--line);text-align:center}
+}
