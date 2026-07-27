@@ -565,6 +565,7 @@ async function recoverSession() {
 
 async function handleAuthChange(session) {
   const wasSignedIn = Boolean(auth.session);
+  const wasAdmin = auth.isAdmin;
   auth.session = session || null;
   auth.ready = true;
   refreshAuthUI();
@@ -572,7 +573,17 @@ async function handleAuthChange(session) {
   refreshAuthUI();
   // Re-render surfaces that depend on admin controls.
   renderFeed();
-  if (!detail.hidden && detail.dataset.slug) {
+  // RESEARCH TRAIL TAB RESET POSTMORTEM (27 Jul, owner video): Supabase's auth client
+  // refreshes the session token in the background (autoRefreshToken, visibility-
+  // triggered refresh, etc.), firing onAuthStateChange -> this handler -- with
+  // NOTHING about the user's admin status actually changing. renderDetail() always
+  // rebuilds the whole answer modal from scratch and defaults to the Overview tab,
+  // so an open answer's Research Trail tab (or any non-Overview tab) silently
+  // reverted to Overview mid-read on a routine background token refresh, unrelated
+  // to anything the reader clicked. The ONLY thing in the detail view that depends
+  // on auth state is the admin-delete button, so only re-render the open modal when
+  // admin status actually flipped.
+  if (!detail.hidden && detail.dataset.slug && auth.isAdmin !== wasAdmin) {
     const current = state.questions.find(q => q.slug === detail.dataset.slug);
     if (current) renderDetail(current, false);
   }
