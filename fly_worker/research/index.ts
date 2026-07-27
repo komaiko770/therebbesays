@@ -38,6 +38,14 @@
 //      check constraint (high/medium/low/NULL only) — the final save failed with 23514
 //      AFTER a full successful research run, and the question was marked failed.
 //      Zero citations now save confidence NULL.
+//   9. MONSTER-CHUNK GUARD (26 Jul, "Los Angeles" postmortem): the corpus contains
+//      155 pathologically large chunks (up to ~93K chars vs. a ~1.4K average — bad
+//      splits in the original scrape). "Los Angeles" keyword retrieval pulled several
+//      into the pool and the run died twice with `prompt is too long: 1552223 tokens
+//      > 1000000 maximum`. Every candidate's text is now capped at
+//      MAX_CANDIDATE_CHARS before it can enter ANY prompt (reflection additionally
+//      caps per-passage length on its own — see analyzeQuestion.ts). Truncation is
+//      marked in the text so reviewers know they saw a prefix.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -78,6 +86,20 @@ const adminHeaders = { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY
 // existed but only 30 could ever be considered; the cap itself was the coverage floor).
 const TOP_K_PER_COLLECTION = 60;
 const N_ADVERSARIAL_VOTERS = 3;
+
+// Monster-chunk guard ("Los Angeles" postmortem, 26 Jul): hard per-candidate text cap
+// applied before candidates reach any LLM prompt. 12K chars keeps ~99.5% of chunks
+// fully intact (avg is ~1.4K) while making the worst case bounded: even a full pool of
+// 120 candidates at the cap is ~1.4M chars ≈ well under the API's 1M-token ceiling for
+// any single verify batch (25 candidates) or synthesis call.
+const MAX_CANDIDATE_CHARS = 12000;
+function capCandidateTexts(list: Candidate[]): Candidate[] {
+  return list.map((c) =>
+    c.text.length > MAX_CANDIDATE_CHARS
+      ? { ...c, text: c.text.slice(0, MAX_CANDIDATE_CHARS) + "\n…[passage truncated for prompt-size safety — abnormally large source chunk]" }
+      : c
+  );
+}
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -218,6 +240,9 @@ async function researchQuestion(question: Question) {
         };
       }
 
+      // Monster-chunk guard — cap BEFORE any prompt sees these.
+      candidates = capCandidateTexts(candidates);
+
       retrievedByCollection = {
         toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
         igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
@@ -238,6 +263,10 @@ async function researchQuestion(question: Question) {
         TOP_K_PER_COLLECTION,
       );
       candidates = Object.values(byCollection).flat();
+
+      // Monster-chunk guard — cap BEFORE reflection/verification/synthesis prompts
+      // ("Los Angeles" postmortem: uncapped keyword hits blew the 1M-token API limit).
+      candidates = capCandidateTexts(candidates);
 
       // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
       await setStage(question.id, "reflecting");
@@ -341,7 +370,7 @@ Deno.serve({ port: RESEARCH_PORT, hostname: "127.0.0.1" }, async (req: Request) 
   if (!question) return response({ error: "Question not found" }, 404);
   if (question.status === "published") {
     const accepted = await queueQuestionImage(question.id);
-    return response({ accepted, status: accepted ? "image_queued" : "image_not_queued" }, accepted ? 202 : 409);
+    return response({ accepted, status: accepted ? "image_queued" : "image_not_queued" }, accepted ? 409 : 409);
   }
   if (!ANTHROPIC_API_KEY) { await patchQuestion(question.id, { research_error: "Awaiting ANTHROPIC_API_KEY" }); return response({ accepted: false, status: "awaiting_api_key" }, 503); }
   if (!["queued", "failed"].includes(question.status) || question.research_attempts >= 2) return response({ accepted: false, status: question.status }, 409);
