@@ -488,6 +488,13 @@ if (feedList) {
 // research_funnel JSON the worker already persists per question; nothing is
 // invented client-side. Questions researched before funnel logging existed
 // simply don't get the tab.
+//
+// (27 Jul, rejection audit) The trail now also renders "Reviewed and turned
+// away": near-miss passages from questions.research_audit — each one passed the
+// first reading as possible evidence but was struck down by the adversarial
+// vote. Shown with its Hebrew excerpt, a link to the original, and BOTH sides
+// of the reasoning (why it was considered, why it was rejected). Questions
+// researched before audit logging existed keep the plain refuted-source list.
 (function researchTrail() {
   const css = `
 #tw-trail-panel{margin:18px 0 8px;text-align:left;font-family:Inter,system-ui,sans-serif}
@@ -502,6 +509,13 @@ if (feedList) {
 #tw-trail-panel .tw-trail-badge{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;padding:2px 9px;border-radius:999px;border:1px solid rgba(201,163,73,.4);color:#c9a349;margin-left:8px;vertical-align:1px}
 #tw-trail-panel ul{margin:6px 0 0;padding-left:18px;font-size:13.5px}
 #tw-trail-panel li{margin:3px 0}
+#tw-trail-panel .tw-miss{border-top:1px solid rgba(201,163,73,.18);padding:12px 0 4px;margin-top:12px}
+#tw-trail-panel .tw-miss:first-of-type{border-top:0;margin-top:4px;padding-top:0}
+#tw-trail-panel .tw-miss>a{color:#c9a349;font-weight:600;font-size:13.5px;text-decoration:none}
+#tw-trail-panel .tw-miss>a:hover{text-decoration:underline}
+#tw-trail-panel .tw-miss-vote{display:inline-block;margin-left:8px;font-size:11px;font-weight:600;letter-spacing:.05em;padding:1px 8px;border-radius:999px;border:1px solid rgba(201,120,90,.45);color:#cf8a68}
+#tw-trail-panel .tw-miss p{font-size:13px;line-height:1.55;margin:6px 0 0;opacity:.85}
+#tw-trail-panel .tw-miss blockquote{margin:8px 0 0;padding:8px 12px;border-right:2px solid rgba(201,163,73,.3);font-family:Fraunces,Georgia,serif;font-size:14.5px;line-height:1.7;opacity:.75;background:rgba(0,0,0,.15);border-radius:6px;text-align:right}
 `;
   const style = document.createElement('style');
   style.textContent = css;
@@ -517,7 +531,7 @@ if (feedList) {
   async function fetchFunnel(slug) {
     if (funnelCache.slug === slug) return funnelCache.data;
     const url = `${SUPABASE_URL}/rest/v1/questions`
-      + `?select=slug,research_funnel,source_count&slug=eq.${encodeURIComponent(slug)}&limit=1`;
+      + `?select=slug,research_funnel,research_audit,source_count&slug=eq.${encodeURIComponent(slug)}&limit=1`;
     const res = await fetch(url, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}` } });
     const rows = res.ok ? await res.json() : [];
     funnelCache = { slug, data: rows[0] || null };
@@ -531,6 +545,8 @@ if (feedList) {
     const r = f.retrieved || {};
     const v = f.pass1_verdicts || {};
     const isCitation = f.route === 'citation';
+    const audit = row?.research_audit;
+    const misses = Array.isArray(audit?.near_misses) ? audit.near_misses : [];
 
     const terms = [
       term('Reference looked up', q.citation_key),
@@ -541,9 +557,27 @@ if (feedList) {
     ].filter(Boolean).join('');
 
     const rejectedTotal = (v.tangential || 0) + (v.false_positive || 0) + (f.refuted_by_adversarial_vote || 0);
-    const refuted = Array.isArray(f.refuted_sources) && f.refuted_sources.length
+    // When the full audit exists, the near-miss cards below replace the bare
+    // refuted-source name list (it would just duplicate their titles).
+    const refuted = !misses.length && Array.isArray(f.refuted_sources) && f.refuted_sources.length
       ? `<ul>${f.refuted_sources.map((s) => `<li>${esc(typeof s === 'string' ? s : `${s.title || s.source || ''}${s.reason ? ` — ${s.reason}` : ''}`)}</li>`).join('')}</ul>`
       : '';
+
+    const missesHtml = misses.length ? `
+      <div class="tw-trail-section">
+        <h3>Reviewed and turned away <span class="tw-trail-badge">${misses.length}</span></h3>
+        <div class="tw-trail-card">
+          <p class="tw-trail-note" style="margin:0 0 4px">These passages passed the first reading as possible evidence but were struck down by independent adversarial review. They are shown for transparency — they are not part of the answer.</p>
+          ${misses.map((m) => `
+          <article class="tw-miss">
+            ${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">${esc(m.title || 'Reviewed passage')} ↗</a>` : `<strong>${esc(m.title || 'Reviewed passage')}</strong>`}
+            ${m.vote ? `<span class="tw-miss-vote">${esc(m.vote)}</span>` : ''}
+            ${m.looked_genuine_because ? `<p><b>Why it was considered:</b> ${esc(m.looked_genuine_because)}</p>` : ''}
+            ${Array.isArray(m.rejected_because) && m.rejected_because[0] ? `<p><b>Why it was rejected:</b> ${esc(m.rejected_because[0])}</p>` : ''}
+            ${m.excerpt ? `<blockquote dir="rtl" lang="he">${esc(m.excerpt)}…</blockquote>` : ''}
+          </article>`).join('')}
+        </div>
+      </div>` : '';
 
     const panel = document.createElement('div');
     panel.id = 'tw-trail-panel';
@@ -580,7 +614,8 @@ if (feedList) {
           ${refuted}
           <p class="tw-trail-note">Every retrieved passage faces adversarial verification before it may be cited — a passage must substantively engage the question, not merely mention its words. Rejections are a sign of strictness, not missed material.</p>
         </div>
-      </div>`;
+      </div>
+      ${missesHtml}`;
     return panel;
   }
 
