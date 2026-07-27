@@ -52,6 +52,10 @@
 //      them into sources.original_source_detail ("Cited in footnote 25 of this
 //      passage"), which the site already renders in the citation tooltip and the
 //      Notes & sources list — no frontend change needed.
+//  11. CLEAN SHORT ANSWER (26 Jul, owner share-card report): short_answer used to be
+//      a raw slice of the answer markdown, so share previews and cards led with
+//      "## Synthesis across the sources". It is now a plain-text excerpt with heading
+//      lines, [^N] markers, and markdown syntax stripped.
 //
 // The topical pipeline (analyzeQuestion -> hybridSearchPerCollection ->
 // reflectOnCandidates -> verify -> synthesize) is unchanged.
@@ -105,6 +109,20 @@ function capCandidateTexts(list: Candidate[]): Candidate[] {
       ? { ...c, text: c.text.slice(0, MAX_CANDIDATE_CHARS) + "\n…[passage truncated for prompt-size safety — abnormally large source chunk]" }
       : c
   );
+}
+
+// Plain-text excerpt for cards and share previews: heading lines, [^N] citation
+// markers, and markdown syntax stripped, whitespace collapsed (change 11).
+function plainExcerpt(markdown: string, maxChars = 280): string | null {
+  const text = String(markdown || "")
+    .replace(/(^|\n)#{1,6}[^\n]*/g, " ")
+    .replace(/\[\^\d+\]/g, " ")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/[>_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text ? text.slice(0, maxChars) : null;
 }
 
 function response(body: unknown, status = 200) {
@@ -358,7 +376,9 @@ async function researchQuestion(question: Question) {
     await patchQuestion(question.id, {
       status: "published",
       answer_markdown: synthesis.answerMarkdown || null,
-      short_answer: synthesis.answerMarkdown ? synthesis.answerMarkdown.slice(0, 280) : null,
+      // Plain-text excerpt, not a raw markdown slice — share cards and feed cards
+      // read this directly (change 11).
+      short_answer: plainExcerpt(synthesis.answerMarkdown),
       keywords: synthesis.topics,
       // NULL (not "none") for zero citations — the questions_confidence_check
       // constraint only allows high/medium/low/NULL ("simcha" postmortem, 26 Jul).
