@@ -121,6 +121,9 @@ export async function parseCitationQuestion(
 type RpcRow = {
   id: number; collection: Collection; source_id: number; volume_heading: string;
   item_heading: string; chunk_index: number; lang: string; chunk_text: string;
+  // Footnote labels in this chunk whose definitions cite the looked-up verse/daf
+  // (returned by lookup_citation_chunks since the 26 Jul footnote-locator migration).
+  footnotes: string[] | null;
 };
 
 /** Looks up every chunk that cites this exact verse/daf, via the lookup_citation_chunks
@@ -151,5 +154,6 @@ export async function lookupCitationChunks(
     lang: r.lang,
     text: r.chunk_text,
     signals: ["citation"],
+    footnotes: Array.isArray(r.footnotes) && r.footnotes.length ? r.footnotes : undefined,
   }));
 }

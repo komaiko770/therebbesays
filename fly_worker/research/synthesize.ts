@@ -24,6 +24,9 @@ export type SynthesisCitation = {
   url: string;
   title: string;
   cited_text: string;
+  // Footnote labels in this passage whose definitions cite the asked-about verse/daf
+  // (citation-route candidates only — see citationLookup.ts, 26 Jul footnote locator).
+  footnotes?: string[];
 };
 
 export type SynthesisResult = {
@@ -40,8 +43,7 @@ function buildSynthesisPrompt(question: string, numberedSources: { n: number; c:
   const sourceBlocks = numberedSources.map(
     ({ n, c }) =>
       `--- Source ${n} (${c.collection === "toras_menachem" ? "Toras Menachem" : "Igrot Kodesh"}) ---\n` +
-      `${c.volume_heading} / ${c.item_heading}\n` +
-      `Hebrew text:\n${c.text}\n`,
+      `${c.volume_heading} / ${c.item_heading}\nHebrew text:\n${c.text}\n`,
   );
   const sourcesText = sourceBlocks.join("\n");
 
@@ -122,6 +124,7 @@ export async function synthesize(
     url: chabadLibraryUrl(c.source_id),
     title: `${c.volume_heading} / ${c.item_heading}`,
     cited_text: c.text.slice(0, 500),
+    footnotes: c.footnotes,
   }));
 
   return { answerMarkdown, citations, topics };
