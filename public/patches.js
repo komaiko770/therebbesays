@@ -12,6 +12,11 @@
 //    Single-viewport layout, sized to FILL the screen (owner: "bigger and bolder"),
 //    with a properly proportioned 770 facade — three steep gables (center highest),
 //    three stories of windows, arched center entrance — traced by a glowing spark.
+//    (27 Jul, owner video) Completed stages now show their REAL output — the
+//    generated search terms once analysis exits, retrieved counts once search
+//    exits, verified/rejected counts once verification exits — read from
+//    questions.research_progress, written incrementally by the worker (index.ts
+//    change 15) as each stage actually finishes. Nothing here is simulated.
 // 3) Topic filter: honest empty state instead of "No questions yet."
 //
 // IMPORTANT: this file must NOT create its own Supabase client. Running two
@@ -23,6 +28,9 @@ const SUPABASE_URL = 'https://euixoavdzwaactdbxnpk.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_viKz06_JdVM5ToTUCgCAbw_l96GI4Bu';
 
 let currentSession = null;
+
+const escOverlay = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const HEB_RE = /[\u0590-\u05FF]/;
 
 // --- 1) Auth: header failsafe + floating chip for the research preloader ----
 function applyAuthVisibility() {
@@ -117,6 +125,35 @@ function stagesFor(q) {
   return CITATION_Q_RE.test(q.question || '') ? CITATION_STAGES : STAGES;
 }
 
+// Real per-stage output (27 Jul, owner video): once a stage has EXITED (not while
+// it's still active), show what it actually produced — read from
+// questions.research_progress, which the worker writes incrementally as each
+// stage finishes (index.ts change 15). Nothing here is invented client-side; a
+// stage with no progress data yet (e.g. an older run, or a race with the poll)
+// simply shows nothing extra.
+function stageResultHtml(stageKey, progress) {
+  if (!progress) return '';
+  if (stageKey === 'analyzing') {
+    const st = progress.search_terms;
+    if (!st) return '';
+    if (st.citation_key) return escOverlay(`Reference: ${st.citation_key}`);
+    const parts = [st.hebrew_query, ...(Array.isArray(st.alt_queries) ? st.alt_queries : [])].filter(Boolean);
+    if (!parts.length) return '';
+    return parts.map((p) => `“${escOverlay(p)}”`).join(' · ');
+  }
+  if (stageKey === 'retrieving') {
+    const r = progress.retrieved;
+    if (!r) return '';
+    return escOverlay(`${r.total} passages found — ${r.toras_menachem} in Toras Menachem, ${r.igrot_kodesh} in Igros Kodesh`);
+  }
+  if (stageKey === 'verifying') {
+    const v = progress.verified;
+    if (!v) return '';
+    return escOverlay(`${v.genuine} verified genuine, ${v.rejected} rejected`);
+  }
+  return '';
+}
+
 // .tw-q: the italic Fraunces closing quote overhangs the text box; with the
 // line-clamp's overflow:hidden it was getting sliced (owner screenshot,
 // 26 Jul 19:24, "Bamidbar 1:2"). Inner padding gives the glyph room inside
@@ -148,6 +185,8 @@ const overlayCss = `
 #tw-research-overlay .tw-stage.active h3{color:#c9a349}
 #tw-research-overlay .tw-stage p{display:none;margin:4px 0 0;font-size:13.5px;line-height:1.5;color:#a99f8c}
 #tw-research-overlay .tw-stage.active p{display:block}
+#tw-research-overlay .tw-stage-result{display:block;margin:4px 0 0;font-size:12.5px;line-height:1.55;color:#c9a349;opacity:.85}
+#tw-research-overlay .tw-stage-result[dir="rtl"]{font-family:Fraunces,Georgia,serif;font-size:13.5px;text-align:right}
 #tw-research-overlay .tw-note{margin:14px auto 0;max-width:480px;font-size:13px;line-height:1.55;color:#a99f8c}
 #tw-research-overlay .tw-back{position:fixed;top:16px;left:16px;z-index:3100;margin:0;color:#c9a349;font:600 13px Inter,system-ui,sans-serif;letter-spacing:.02em;text-decoration:none;border:1px solid rgba(201,163,73,.4);border-radius:999px;padding:8px 16px;background:rgba(20,18,16,.85);backdrop-filter:blur(6px)}
 #tw-research-overlay .tw-back:hover{background:rgba(201,163,73,.12)}
@@ -169,6 +208,7 @@ const overlayCss = `
   #tw-research-overlay .tw-stage.active{padding:6px 0 6px 26px}
   #tw-research-overlay .tw-stage::before{top:9px}
   #tw-research-overlay .tw-stage.active::before{top:11px}
+  #tw-research-overlay .tw-stage-result{font-size:11.5px}
 }
 `;
 
@@ -249,8 +289,10 @@ function renderOverlay(q) {
     document.body.style.overflow = 'hidden';
   }
   // Only re-render when the real state changes — keeps the spark animation smooth
-  // and lets the 1s ticker own the timer text between polls.
-  const key = `${q.slug}|${q.status}|${q.research_stage || ''}|${q.research_started_at || ''}`;
+  // and lets the 1s ticker own the timer text between polls. research_progress is
+  // included so a completed stage's real output (search terms, counts) triggers a
+  // re-render the moment it lands, not just on status/stage transitions.
+  const key = `${q.slug}|${q.status}|${q.research_stage || ''}|${q.research_started_at || ''}|${JSON.stringify(q.research_progress || null)}`;
   if (lastOverlayKey === key) { syncChipVisibility(); return; }
   lastOverlayKey = key;
   const queued = q.status === 'queued';
@@ -261,7 +303,11 @@ function renderOverlay(q) {
     let cls = '';
     if (!queued && idx >= 0) cls = i < idx ? 'done' : i === idx ? 'active' : '';
     else if (!queued && idx < 0) cls = i === 0 ? 'active' : '';
-    return `<div class="tw-stage ${cls}"><h3>${title}</h3><p>${desc}</p></div>`;
+    // Real output of a stage that has EXITED (owner video, 27 Jul) — never shown
+    // while still active, only once the next stage has begun.
+    const result = cls === 'done' ? stageResultHtml(key2, q.research_progress) : '';
+    const resultHtml = result ? `<p class="tw-stage-result" dir="${HEB_RE.test(result) ? 'rtl' : 'ltr'}">${result}</p>` : '';
+    return `<div class="tw-stage ${cls}"><h3>${title}</h3><p>${desc}</p>${resultHtml}</div>`;
   }).join('');
   overlay.innerHTML = `
     <a class="tw-back" href="/">← Back to the feed</a>
@@ -293,7 +339,7 @@ function removeOverlay() {
 
 async function fetchQuestion(slug) {
   const url = `${SUPABASE_URL}/rest/v1/questions`
-    + `?select=slug,question,status,research_stage,research_started_at&slug=eq.${encodeURIComponent(slug)}&limit=1`;
+    + `?select=slug,question,status,research_stage,research_started_at,research_progress&slug=eq.${encodeURIComponent(slug)}&limit=1`;
   const res = await fetch(url, { headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${SUPABASE_KEY}` } });
   const rows = res.ok ? await res.json() : [];
   return rows[0] || null;
@@ -353,6 +399,7 @@ if (detailNode) {
         status: 'researching',
         research_stage: null,
         research_started_at: null,
+        research_progress: null,
       });
     }
     pollResearch();
@@ -495,6 +542,13 @@ if (feedList) {
 // vote. Shown with its Hebrew excerpt, a link to the original, and BOTH sides
 // of the reasoning (why it was considered, why it was rejected). Questions
 // researched before audit logging existed keep the plain refuted-source list.
+//
+// (27 Jul, owner video "full auditability") The summary counts (60 retrieved,
+// 15 genuine, 45 rejected…) used to be dead numbers — only near-misses had any
+// identity attached. Every retrieved passage now has a per-candidate record in
+// research_audit.entries (worker change 13/14), so each count below gets an
+// expandable <details> list of every passage behind it, with a link to the
+// original and its verdict/justification — "what are the 60?", answered.
 (function researchTrail() {
   const css = `
 #tw-trail-panel{margin:18px 0 8px;text-align:left;font-family:Inter,system-ui,sans-serif}
@@ -516,6 +570,19 @@ if (feedList) {
 #tw-trail-panel .tw-miss-vote{display:inline-block;margin-left:8px;font-size:11px;font-weight:600;letter-spacing:.05em;padding:1px 8px;border-radius:999px;border:1px solid rgba(201,120,90,.45);color:#cf8a68}
 #tw-trail-panel .tw-miss p{font-size:13px;line-height:1.55;margin:6px 0 0;opacity:.85}
 #tw-trail-panel .tw-miss blockquote{margin:8px 0 0;padding:8px 12px;border-right:2px solid rgba(201,163,73,.3);font-family:Fraunces,Georgia,serif;font-size:14.5px;line-height:1.7;opacity:.75;background:rgba(0,0,0,.15);border-radius:6px;text-align:right}
+#tw-trail-panel .tw-trail-details{margin-top:12px;border-top:1px solid rgba(201,163,73,.18);padding-top:10px}
+#tw-trail-panel .tw-trail-details summary{cursor:pointer;font-size:12.5px;font-weight:600;color:#c9a349;list-style:none}
+#tw-trail-panel .tw-trail-details summary::-webkit-details-marker{display:none}
+#tw-trail-panel .tw-trail-details summary::before{content:'▸ ';display:inline-block;transition:transform .15s}
+#tw-trail-panel .tw-trail-details[open] summary::before{transform:rotate(90deg)}
+#tw-trail-panel .tw-trail-details ul{max-height:340px;overflow-y:auto;padding-right:6px}
+#tw-trail-panel .tw-trail-details li{padding:5px 0;border-bottom:1px solid rgba(201,163,73,.08);list-style:none;margin:0}
+#tw-trail-panel .tw-trail-details li>a{color:#e9dfc8;text-decoration:none;font-weight:500}
+#tw-trail-panel .tw-trail-details li>a:hover{text-decoration:underline;color:#c9a349}
+#tw-trail-panel .tw-entry-tag{display:inline-block;margin-left:7px;font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:1px 7px;border-radius:999px;border:1px solid rgba(201,163,73,.35);color:#c9a349;vertical-align:1px}
+#tw-trail-panel .tw-entry-tag.tw-entry-false_positive,#tw-trail-panel .tw-entry-tag.tw-entry-tangential{border-color:rgba(201,120,90,.4);color:#cf8a68}
+#tw-trail-panel .tw-entry-tag.tw-entry-near_miss{border-color:rgba(201,120,90,.4);color:#cf8a68}
+#tw-trail-panel .tw-entry-note{display:block;font-size:12px;line-height:1.5;opacity:.65;margin-top:2px}
 `;
   const style = document.createElement('style');
   style.textContent = css;
@@ -525,6 +592,30 @@ if (feedList) {
   const HEB = /[\u0590-\u05FF]/;
   const term = (label, value) => value
     ? `<dt>${esc(label)}</dt><dd ${HEB.test(String(value)) ? 'dir="rtl"' : ''}>${esc(value)}</dd>` : '';
+
+  // Per-candidate audit entry -> a plain-language disposition label. Distinguishes
+  // "never genuine" (tangential/false_positive) from "genuine but adversarially
+  // refuted" (near_miss, detailed further up in the near-miss cards) from
+  // "genuine, just not written up for space" (change 14).
+  const ENTRY_TAG = {
+    cited: 'Cited in the answer',
+    genuine_excluded_for_space: 'Verified genuine — not written up (space)',
+    tangential: 'Passing mention',
+    false_positive: 'Not a genuine match',
+    near_miss: 'Reviewed & rejected on appeal',
+    no_verdict: 'Not evaluated',
+  };
+
+  function entryLine(e) {
+    const tag = ENTRY_TAG[e.final] || e.final;
+    const note = e.justification ? esc(String(e.justification)).slice(0, 200) : '';
+    return `<li>${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.title || 'Passage')} ↗</a>` : esc(e.title || 'Passage')}<span class="tw-entry-tag tw-entry-${esc(e.final)}">${esc(tag)}</span>${note ? `<span class="tw-entry-note">${note}</span>` : ''}</li>`;
+  }
+
+  function detailsList(summaryLabel, list) {
+    if (!list.length) return '';
+    return `<details class="tw-trail-details"><summary>${esc(summaryLabel)} (${list.length})</summary><ul>${list.map(entryLine).join('')}</ul></details>`;
+  }
 
   let funnelCache = { slug: null, data: null };
 
@@ -547,6 +638,13 @@ if (feedList) {
     const isCitation = f.route === 'citation';
     const audit = row?.research_audit;
     const misses = Array.isArray(audit?.near_misses) ? audit.near_misses : [];
+    const entries = Array.isArray(audit?.entries) ? audit.entries : [];
+
+    // Full auditability (27 Jul, owner video): group every retrieved candidate by
+    // its final disposition so "60 retrieved / 15 genuine / 45 rejected" each
+    // expand into the actual passages behind the number, with links out.
+    const genuineEntries = entries.filter((e) => e.final === 'cited' || e.final === 'genuine_excluded_for_space');
+    const rejectedEntries = entries.filter((e) => e.final === 'tangential' || e.final === 'false_positive' || e.final === 'near_miss');
 
     const terms = [
       term('Reference looked up', q.citation_key),
@@ -598,6 +696,7 @@ if (feedList) {
             <dt>From Igros Kodesh</dt><dd>${esc(r.igrot_kodesh ?? '—')}</dd>
             ${f.top_k_per_collection ? `<dt>Search depth</dt><dd>top ${esc(f.top_k_per_collection)} per work</dd>` : ''}
           </dl>
+          ${detailsList('Show every retrieved passage', entries)}
         </div>
       </div>
       <div class="tw-trail-section">
@@ -612,6 +711,8 @@ if (feedList) {
             <dt>Cited in the answer</dt><dd>${esc(f.cited ?? row.source_count ?? '—')}</dd>
           </dl>
           ${refuted}
+          ${detailsList('Show every verified-genuine passage', genuineEntries)}
+          ${detailsList('Show every rejected passage', rejectedEntries)}
           <p class="tw-trail-note">Every retrieved passage faces adversarial verification before it may be cited — a passage must substantively engage the question, not merely mention its words. Rejections are a sign of strictness, not missed material.</p>
         </div>
       </div>
@@ -648,44 +749,60 @@ if (feedList) {
     btn?.setAttribute('aria-selected', 'false');
   }
 
+  // Re-entrancy guard (27 Jul, owner video "shifted back to overview"): ensureTab
+  // is async (it awaits a network fetch before mounting the tab), and its
+  // MutationObserver fires on every DOM change inside #detail, including its own
+  // panel insertion. Without this guard, two overlapping invocations could both
+  // pass the "tab doesn't exist yet" check before either finished, mount TWO
+  // trail tabs/panels, and attach duplicate close-listeners to the native tabs.
+  let ensureTabInFlight = false;
+
   async function ensureTab() {
     if (!/^\/answer\//.test(location.pathname)) return;
     const detail = document.querySelector('#detail');
     if (!detail) return;
     if (detail.querySelector('.tw-trail-tab')) return;
-    // Tab detection (owner report, 26 Jul 19:42): the answer tabs were renamed
-    // to Overview / Toras Menachem / Igros Kodesh (with <small> counts), so the
-    // old text match ("Synthesis" / "Source-by-source") found fewer than two
-    // tabs and the trail tab silently stopped mounting — even on answers whose
-    // research_funnel was recorded. Match the structural tab bar first
-    // (.answer-tabs [data-answer-tab]); keep the text match only as a fallback
-    // for any older markup.
-    const answerBar = detail.querySelector('.answer-tabs');
-    const tabs = answerBar
-      ? Array.from(answerBar.querySelectorAll('button[data-answer-tab]'))
-      : Array.from(detail.querySelectorAll('button'))
-          .filter((b) => /^(synthesis|source[- ]by[- ]source|overview)$/i.test((b.textContent || '').trim()));
-    if (!tabs.length) return;
-    const slug = decodeURIComponent(location.pathname.match(/^\/answer\/([^/]+)/)?.[1] || '');
-    const row = await fetchFunnel(slug).catch(() => null);
-    const panel = row ? buildPanel(row) : null;
-    if (!panel) return; // no funnel recorded (pre-logging question) — no tab.
-    if (detail.querySelector('.tw-trail-tab')) return; // re-check after await
-    const bar = answerBar || tabs[0].parentElement;
-    const btn = tabs[0].cloneNode(false);
-    btn.className = tabs[0].className;
-    btn.classList.remove('active');
-    btn.classList.add('tw-trail-tab');
-    // The clone carries the Overview tab's data-answer-tab and aria-selected —
-    // strip both, or app.js's global tab handler hijacks the click (showing
-    // the Overview panel instead of the trail) and the tab renders selected.
-    btn.removeAttribute('data-answer-tab');
-    btn.setAttribute('aria-selected', 'false');
-    btn.type = 'button';
-    btn.textContent = 'Research trail';
-    bar.appendChild(btn);
-    btn.addEventListener('click', () => openTrail(bar, tabs, btn, panel));
-    tabs.forEach((t) => t.addEventListener('click', () => closeTrail(btn)));
+    if (ensureTabInFlight) return;
+    ensureTabInFlight = true;
+    try {
+      // Tab detection (owner report, 26 Jul 19:42): the answer tabs were renamed
+      // to Overview / Toras Menachem / Igros Kodesh (with <small> counts), so the
+      // old text match ("Synthesis" / "Source-by-source") found fewer than two
+      // tabs and the trail tab silently stopped mounting — even on answers whose
+      // research_funnel was recorded. Match the structural tab bar first
+      // (.answer-tabs [data-answer-tab]); keep the text match only as a fallback
+      // for any older markup.
+      const answerBar = detail.querySelector('.answer-tabs');
+      const tabs = answerBar
+        ? Array.from(answerBar.querySelectorAll('button[data-answer-tab]'))
+        : Array.from(detail.querySelectorAll('button'))
+            .filter((b) => /^(synthesis|source[- ]by[- ]source|overview)$/i.test((b.textContent || '').trim()));
+      if (!tabs.length) return;
+      const slug = decodeURIComponent(location.pathname.match(/^\/answer\/([^/]+)/)?.[1] || '');
+      const row = await fetchFunnel(slug).catch(() => null);
+      const panel = row ? buildPanel(row) : null;
+      if (!panel) return; // no funnel recorded (pre-logging question) — no tab.
+      if (detail.querySelector('.tw-trail-tab')) return; // re-check after await
+      const bar = answerBar || tabs[0].parentElement;
+      const btn = tabs[0].cloneNode(false);
+      btn.className = tabs[0].className;
+      btn.classList.remove('active');
+      btn.classList.add('tw-trail-tab');
+      // The clone carries the Overview tab's data-answer-tab and aria-selected —
+      // strip both, or app.js's global tab handler hijacks the click (showing
+      // the Overview panel instead of the trail) and the tab renders selected.
+      btn.removeAttribute('data-answer-tab');
+      btn.setAttribute('aria-selected', 'false');
+      btn.type = 'button';
+      btn.textContent = 'Research trail';
+      bar.appendChild(btn);
+      // stopPropagation (defensive, 27 Jul): keeps this click fully isolated from
+      // any other delegated listener on an ancestor of the tab bar.
+      btn.addEventListener('click', (event) => { event.stopPropagation(); openTrail(bar, tabs, btn, panel); });
+      tabs.forEach((t) => t.addEventListener('click', (event) => { event.stopPropagation(); closeTrail(btn); }));
+    } finally {
+      ensureTabInFlight = false;
+    }
   }
 
   const detail = document.querySelector('#detail');
