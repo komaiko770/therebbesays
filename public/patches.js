@@ -414,7 +414,13 @@ if (feedList) {
     document.querySelectorAll('#feed-list .index-card').forEach((card) => {
       const thumb = card.querySelector('.card-thumb');
       if (!thumb) return;
-      const inProgress = card.querySelector('.status.queued, .status.researching');
+      // "RESEARCH RETRYING" cards (status "failed" in the DB, presented as
+      // still-in-flight) kept the numbered placeholder (owner screenshot,
+      // 26 Jul 19:49). Match the badge TEXT — queued / researching / retrying —
+      // instead of specific class names, so every in-flight presentation gets
+      // the 770 thumb regardless of which status class app.js used.
+      const statusEl = card.querySelector('.status');
+      const inProgress = statusEl && /queued|researching|retrying/i.test(statusEl.textContent || '');
       if (inProgress && !thumb.querySelector('.card-thumb-progress')) {
         thumb.innerHTML = `<span class="card-thumb-progress" aria-hidden="true">${MINI_770}</span>`;
       }
