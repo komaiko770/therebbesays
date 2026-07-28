@@ -239,9 +239,15 @@ ${lines}
 
 Total: ${total} passage matches across all variants.
 
-This recall is too thin, or some variants match nothing at all. Matching is literal substring matching, so a variant scoring 0 is NOT evidence the corpus is silent on the topic. It almost always means the wording is wrong: too long (a full inflected form where a stem was needed), too modern (a loanword the corpus never used), or the wrong register (Israeli Hebrew where the talks use transcribed Yiddish).
+This recall is thin, or some variants match nothing at all. Matching is literal substring matching, so a variant scoring 0 is NOT evidence the corpus is silent on the topic. It almost always means the wording is wrong: too long (a full inflected form where a stem was needed), too modern (a loanword the corpus never used), or the wrong register (Israeli Hebrew where the talks use transcribed Yiddish).
 
-Propose ADDITIONAL variants that will actually hit. Prefer short stems. Consider what a Yiddish-speaking Torah scholar in 1950-1973 would have called this, and consider the PEOPLE involved in it, not only the place or object.
+CRITICAL - DO NOT MAXIMIZE MATCHES. Your goal is variants that are SPECIFIC to this anchor topic, not variants that match a lot. A stem matching thousands of passages - generic words like student, boy, studies, school, learning - has stopped discriminating. It floods retrieval with passages that have nothing to do with the question, the verification panel rejects all of them, and the answer ends up citing NOTHING. A previous run of this exact system proposed such generic stems, retrieved 120 passages, and cited zero. Broad variants are far worse than useless.
+
+TARGET BAND: each new variant should match roughly 5-300 passages. Anything matching more than 300 is REJECTED automatically by the code before retrieval, so proposing it simply wastes your slot. Aim for a TOTAL in the 30-300 range across all variants.
+
+Propose ADDITIONAL variants that will actually hit while staying distinctive. Prefer short stems. Consider what a Yiddish-speaking Torah scholar in 1950-1973 would have called this, including transcribed Yiddish spellings, and consider the PEOPLE involved in it, not only the place or object - but only where that wording is distinctive to THIS topic.
+
+If you genuinely cannot find more distinctive wording, return FEWER variants, or none. A thin, precise result is a correct outcome; a flooded one is a failure.
 
 Call report_widened_anchors.`;
 }

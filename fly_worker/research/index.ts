@@ -424,6 +424,11 @@ async function researchQuestion(question: Question) {
       // each proposed stem actually matches; if recall is thin or any stem is dead,
       // show the model the real numbers and let it widen once.
       const ANCHOR_THIN_RECALL_FLOOR = 12;
+      // Ceiling (postmortem #3, 28 Jul): widening to 6,281 matches on generic stems
+      // (student=3130, boy=762) filled all 120 slots with unrelated passages and cited
+      // ZERO sources - strictly worse than the thin result it "fixed". A stem this
+      // common no longer discriminates, so it is refused in code, not left to the model.
+      const ANCHOR_VARIANT_CEILING = 300;
       const countVariants = async (terms: string[]): Promise<Record<string, number>> => {
         if (!terms.length) return {};
         try {
@@ -446,6 +451,7 @@ async function researchQuestion(question: Question) {
 
       let variantCounts = await countVariants(anchors.anchor_variants);
       let widenedFrom: string[] | null = null;
+      let rejectedCounts: Record<string, number> = {};
       const sumCounts = (m: Record<string, number>) => Object.values(m).reduce((x, y) => x + y, 0);
       const deadCount = Object.values(variantCounts).filter((n) => n === 0).length;
 
@@ -459,15 +465,39 @@ async function researchQuestion(question: Question) {
             anchors.anchor_phrase,
             variantCounts,
           );
-          const merged = Array.from(new Set([...anchors.anchor_variants, ...widened.anchor_variants]));
-          if (merged.length > anchors.anchor_variants.length) {
-            widenedFrom = anchors.anchor_variants;
-            anchors.anchor_variants = merged;
-            if (widened.qualifier_terms.length) {
-              anchors.qualifier_terms = Array.from(new Set([...anchors.qualifier_terms, ...widened.qualifier_terms]));
+          const proposed = widened.anchor_variants.filter((v) => !anchors.anchor_variants.includes(v));
+          if (proposed.length) {
+            const proposedCounts = await countVariants(proposed);
+            const tooBroad = proposed.filter((v) => (proposedCounts[v] ?? 0) > ANCHOR_VARIANT_CEILING);
+            const dead = proposed.filter((v) => (proposedCounts[v] ?? 0) === 0);
+            const kept = proposed.filter((v) => {
+              const n = proposedCounts[v] ?? 0;
+              return n > 0 && n <= ANCHOR_VARIANT_CEILING;
+            });
+            for (const v of [...tooBroad, ...dead]) rejectedCounts[v] = proposedCounts[v] ?? 0;
+            if (tooBroad.length) {
+              console.log(
+                `rejected ${tooBroad.length} non-discriminating variants (> ${ANCHOR_VARIANT_CEILING} matches): ` +
+                  tooBroad.map((v) => `${v}=${proposedCounts[v] ?? 0}`).join(", "),
+              );
             }
-            variantCounts = await countVariants(anchors.anchor_variants);
-            console.log(`widened to ${merged.length} variants, ${sumCounts(variantCounts)} total matches`);
+            if (dead.length) console.log(`rejected ${dead.length} dead widened variants: ${dead.join(", ")}`);
+            // Never-worse guard: if nothing survives the ceiling, keep the ORIGINAL
+            // anchors untouched. Widening must not be able to degrade a run.
+            if (kept.length) {
+              widenedFrom = anchors.anchor_variants;
+              anchors.anchor_variants = Array.from(new Set([...anchors.anchor_variants, ...kept]));
+              if (widened.qualifier_terms.length) {
+                anchors.qualifier_terms = Array.from(new Set([...anchors.qualifier_terms, ...widened.qualifier_terms]));
+              }
+              for (const v of kept) variantCounts[v] = proposedCounts[v] ?? 0;
+              console.log(
+                `widened to ${anchors.anchor_variants.length} variants, ${sumCounts(variantCounts)} total matches ` +
+                  `(kept ${kept.length} of ${proposed.length} proposals)`,
+              );
+            } else {
+              console.log("widening produced no usable variants - proceeding with original anchors");
+            }
           }
         } catch (e) {
           console.warn(`anchor widening failed; proceeding with original variants: ${String(e)}`);
@@ -480,6 +510,7 @@ async function researchQuestion(question: Question) {
         qualifier_terms: anchors.qualifier_terms,
         variant_counts: variantCounts,
         widened_from: widenedFrom,
+        rejected_variants: rejectedCounts,
       } as any;
       await setProgress(question.id, progress);
 
@@ -550,6 +581,7 @@ async function researchQuestion(question: Question) {
         qualifier_terms: anchors.qualifier_terms,
         variant_counts: variantCounts,
         widened_from: widenedFrom,
+        rejected_variants: rejectedCounts,
         retrieval_mode: "anchored",
       } as any;
     }
