@@ -137,6 +137,16 @@ function stageResultHtml(stageKey, progress) {
     const st = progress.search_terms;
     if (!st) return '';
     if (st.citation_key) return escOverlay(`Reference: ${st.citation_key}`);
+    // ANCHORED TOPICAL ROUTE (28 Jul): the worker no longer writes hebrew_query /
+    // alt_queries for topical questions — it writes the governing anchor phrase and
+    // its Hebrew surface variants. Without this branch the "Analyzing your question"
+    // stage rendered nothing at all once a stage completed.
+    if (st.anchor_phrase || Array.isArray(st.anchor_variants)) {
+      const vars = (Array.isArray(st.anchor_variants) ? st.anchor_variants : []).filter(Boolean);
+      const head = st.anchor_phrase ? `Anchor: ${escOverlay(st.anchor_phrase)}` : 'Anchor';
+      if (!vars.length) return head;
+      return `${head} — <bdi dir="rtl">${vars.map((v) => `“${escOverlay(v)}”`).join(' · ')}</bdi>`;
+    }
     const parts = [st.hebrew_query, ...(Array.isArray(st.alt_queries) ? st.alt_queries : [])].filter(Boolean);
     if (!parts.length) return '';
     return parts.map((p) => `“${escOverlay(p)}”`).join(' · ');
@@ -144,7 +154,13 @@ function stageResultHtml(stageKey, progress) {
   if (stageKey === 'retrieving') {
     const r = progress.retrieved;
     if (!r) return '';
-    return escOverlay(`${r.total} passages found — ${r.toras_menachem} in Toras Menachem, ${r.igrot_kodesh} in Igros Kodesh`);
+    // Anchored route also reports the exhaustive anchor-match count; showing only the
+    // ranked shortlist understated how much of the corpus was actually swept.
+    const tail = `${r.toras_menachem} in Toras Menachem, ${r.igrot_kodesh} in Igros Kodesh`;
+    if (r.anchor_matched_total != null && r.anchor_matched_total > r.total) {
+      return escOverlay(`${r.anchor_matched_total} passages mention the anchor — top ${r.total} carried forward: ${tail}`);
+    }
+    return escOverlay(`${r.total} passages found — ${tail}`);
   }
   if (stageKey === 'verifying') {
     const v = progress.verified;
@@ -306,7 +322,7 @@ function renderOverlay(q) {
     // Real output of a stage that has EXITED (owner video, 27 Jul) — never shown
     // while still active, only once the next stage has begun.
     const result = cls === 'done' ? stageResultHtml(key2, q.research_progress) : '';
-    const resultHtml = result ? `<p class="tw-stage-result" dir="${HEB_RE.test(result) ? 'rtl' : 'ltr'}">${result}</p>` : '';
+    const resultHtml = result ? `<p class="tw-stage-result" dir="${!result.includes('<bdi') && HEB_RE.test(result) ? 'rtl' : 'ltr'}">${result}</p>` : '';
     return `<div class="tw-stage ${cls}"><h3>${title}</h3><p>${desc}</p>${resultHtml}</div>`;
   }).join('');
   overlay.innerHTML = `
@@ -646,8 +662,16 @@ if (feedList) {
     const genuineEntries = entries.filter((e) => e.final === 'cited' || e.final === 'genuine_excluded_for_space');
     const rejectedEntries = entries.filter((e) => e.final === 'tangential' || e.final === 'false_positive' || e.final === 'near_miss');
 
+    // ANCHORED TOPICAL ROUTE (28 Jul): topical funnels record anchor_phrase /
+    // anchor_variants / qualifier_terms instead of hebrew_query / alt_queries, so the
+    // old list matched nothing and every new topical answer showed
+    // "Not recorded for this question." Legacy keys are kept for older answers.
+    const isAnchored = q.retrieval_mode === 'anchored' || Boolean(q.anchor_phrase);
     const terms = [
       term('Reference looked up', q.citation_key),
+      term('Anchor concept', q.anchor_phrase),
+      ...(Array.isArray(q.anchor_variants) ? q.anchor_variants.map((t, i) => term(`Hebrew form ${i + 1}`, t)) : []),
+      ...(Array.isArray(q.qualifier_terms) ? q.qualifier_terms.map((t, i) => term(`Ranking term ${i + 1}`, t)) : []),
       term('Primary Hebrew query', q.hebrew_query),
       ...(Array.isArray(q.alt_queries) ? q.alt_queries.map((t, i) => term(`Alternate query ${i + 1}`, t)) : []),
       term('Fallback Hebrew query', q.fallback_hebrew_query),
@@ -681,9 +705,10 @@ if (feedList) {
     panel.id = 'tw-trail-panel';
     panel.innerHTML = `
       <div class="tw-trail-section">
-        <h3>How this was researched${isCitation ? '<span class="tw-trail-badge">CITATION LOOKUP</span>' : '<span class="tw-trail-badge">TOPICAL SEARCH</span>'}</h3>
+        <h3>How this was researched${isCitation ? '<span class="tw-trail-badge">CITATION LOOKUP</span>' : isAnchored ? '<span class="tw-trail-badge">ANCHORED SEARCH</span>' : '<span class="tw-trail-badge">TOPICAL SEARCH</span>'}</h3>
         <div class="tw-trail-card">
           <dl>${terms || '<dt>Search terms</dt><dd>Not recorded for this question.</dd>'}</dl>
+          ${isAnchored ? '<p class="tw-trail-note">This question was researched by anchor: every passage in the corpus literally containing one of the Hebrew forms above was retrieved — exhaustively, not by similarity — and the ranking terms only ordered them. Inclusion was decided by the anchor; relevance was decided by the verification panel below.</p>' : ''}
           ${isCitation ? '<p class="tw-trail-note">Citation questions first pull every passage in the corpus index that explicitly cites this reference. When the index is sparse, a semantic search supplements it, so by-name references (e.g. quoting the passage’s opening words) are found too.</p>' : ''}
         </div>
       </div>
@@ -694,7 +719,7 @@ if (feedList) {
             <dt>Total passages retrieved</dt><dd>${esc(r.total ?? '—')}</dd>
             <dt>From Toras Menachem</dt><dd>${esc(r.toras_menachem ?? '—')}</dd>
             <dt>From Igros Kodesh</dt><dd>${esc(r.igrot_kodesh ?? '—')}</dd>
-            ${f.top_k_per_collection ? `<dt>Search depth</dt><dd>top ${esc(f.top_k_per_collection)} per work</dd>` : ''}
+            ${f.top_k_per_collection ? `<dt>Search depth</dt><dd>${isAnchored ? `top ${esc(f.top_k_per_collection)} anchor matches per work, ranked by the terms above` : `top ${esc(f.top_k_per_collection)} per work`}</dd>` : ''}
           </dl>
           ${detailsList('Show every retrieved passage', entries)}
         </div>
