@@ -132,8 +132,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 import { setUsageContext } from "./anthropicClient.ts";
-import { extractAnchors } from "./analyzeQuestion.ts";
-import { anchoredSearch, rankByQualifiers, AnchorSearchFailure } from "./retrieve.ts";
 const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -155,10 +153,6 @@ const N_ADVERSARIAL_VOTERS = 3;
 // real, verified evidence — they're recorded in the audit trail as
 // genuine_excluded_for_space, not discarded from the record, just not written up.
 const MAX_SYNTHESIS_SOURCES = 20;
-// Per anchor variant, per collection. The corpus is ~33.5K chunks and the 400-row
-// cap was removed from search_corpus_chunks_text on 28 Jul, so this is a sanity
-// ceiling rather than a real constraint.
-const ANCHOR_PER_VARIANT_LIMIT = 500;
 
 // Monster-chunk guard ("Los Angeles" postmortem, 26 Jul): hard per-candidate text cap
 // applied before candidates reach any LLM prompt. 12K chars keeps ~99.5% of chunks
@@ -415,84 +409,60 @@ async function researchQuestion(question: Question) {
       progress.retrieved = { total: candidates.length, ...retrievedByCollection };
       await setProgress(question.id, progress);
     } else {
-      // Topical route — ANCHORED (28 Jul, "college campus" postmortem).
-      // Step 1: identify the governing noun phrase and its Hebrew surface forms.
-      const anchors = await extractAnchors(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+      // Topical route — unchanged.
+      // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
+      const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+      const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
 
+      // Progress (change 15): the generated search terms are the real output of the
+      // "Analyzing your question" stage — written the moment it's known, BEFORE
+      // retrieval starts, so the preloader can show it as soon as that stage exits.
       progress.search_terms = {
-        anchor_phrase: anchors.anchor_phrase,
-        anchor_variants: anchors.anchor_variants,
-        qualifier_terms: anchors.qualifier_terms,
-      } as any;
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
       await setProgress(question.id, progress);
 
-      // Step 2: exhaustive anchor retrieval — EVERY chunk containing any variant.
+      // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
       await setStage(question.id, "retrieving");
-      let anchoredByCollection;
-      try {
-        anchoredByCollection = await anchoredSearch(
-          SUPABASE_URL,
-          adminHeaders,
-          anchors.anchor_variants,
-          ANCHOR_PER_VARIANT_LIMIT,
-        );
-      } catch (e) {
-        if (e instanceof AnchorSearchFailure) {
-          // Never publish an honest zero on a search failure — fail the run loudly
-          // so it surfaces as a retryable error rather than "the corpus is silent."
-          await patchQuestion(question.id, {
-            research_error: `Anchor search failed; not publishing an empty result: ${e.message}`,
-          });
-          return;
-        }
-        throw e;
-      }
-
-      // Step 3: qualifiers RANK the anchor matches; they never gate them.
-      candidates = [
-        ...rankByQualifiers(anchoredByCollection.toras_menachem, anchors.qualifier_terms, TOP_K_PER_COLLECTION),
-        ...rankByQualifiers(anchoredByCollection.igrot_kodesh, anchors.qualifier_terms, TOP_K_PER_COLLECTION),
-      ];
+      const byCollection = await hybridSearchPerCollection(
+        SUPABASE_URL,
+        adminHeaders,
+        queryTexts,
+        analysis.keyword_terms,
+        TOP_K_PER_COLLECTION,
+      );
+      candidates = Object.values(byCollection).flat();
 
       // Monster-chunk guard — cap BEFORE reflection/verification/synthesis prompts
-      // ("Los Angeles" postmortem: uncapped hits blew the 1M-token API limit).
+      // ("Los Angeles" postmortem: uncapped keyword hits blew the 1M-token API limit).
       candidates = capCandidateTexts(candidates);
 
       retrievedByCollection = {
-        toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
-        igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
+        toras_menachem: byCollection.toras_menachem?.length ?? 0,
+        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
       };
-      progress.retrieved = {
-        total: candidates.length,
-        anchor_matched_total:
-          anchoredByCollection.toras_menachem.length + anchoredByCollection.igrot_kodesh.length,
-        ...retrievedByCollection,
-      } as any;
+      // Progress (change 15): retrieved counts are the real output of the
+      // "Searching..." stage — written the moment retrieval finishes.
+      progress.retrieved = { total: candidates.length, ...retrievedByCollection };
       await setProgress(question.id, progress);
 
-      topicGuidance = anchors.topic_guidance;
-
-      // Step 4: reflect on the REAL anchor-matched candidates. Skipped when the
-      // corpus genuinely has nothing — reflecting on an empty pool is a wasted
-      // call that can only hallucinate guidance about passages that don't exist.
-      if (candidates.length > 0) {
-        await setStage(question.id, "reflecting");
-        const reflection = await reflectOnCandidates(
-          ANTHROPIC_API_KEY,
-          ANTHROPIC_MODEL,
-          question.question,
-          anchors.topic_guidance,
-          candidates,
-        );
-        topicGuidance = reflection.updated_guidance;
-      }
-
+      // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
+      await setStage(question.id, "reflecting");
+      const reflection = await reflectOnCandidates(
+        ANTHROPIC_API_KEY,
+        ANTHROPIC_MODEL,
+        question.question,
+        analysis.topic_guidance,
+        candidates,
+      );
+      topicGuidance = reflection.updated_guidance;
       funnelQueries = {
-        anchor_phrase: anchors.anchor_phrase,
-        anchor_variants: anchors.anchor_variants,
-        qualifier_terms: anchors.qualifier_terms,
-        retrieval_mode: "anchored",
-      } as any;
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
     }
 
     // Step 4: two-pass verification (classify, then adversarial vote on every GENUINE

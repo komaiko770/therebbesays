@@ -131,9 +131,6 @@ type SourceRow = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-import { setUsageContext } from "./anthropicClient.ts";
-import { extractAnchors } from "./analyzeQuestion.ts";
-import { anchoredSearch, rankByQualifiers, AnchorSearchFailure } from "./retrieve.ts";
 const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -155,10 +152,6 @@ const N_ADVERSARIAL_VOTERS = 3;
 // real, verified evidence — they're recorded in the audit trail as
 // genuine_excluded_for_space, not discarded from the record, just not written up.
 const MAX_SYNTHESIS_SOURCES = 20;
-// Per anchor variant, per collection. The corpus is ~33.5K chunks and the 400-row
-// cap was removed from search_corpus_chunks_text on 28 Jul, so this is a sanity
-// ceiling rather than a real constraint.
-const ANCHOR_PER_VARIANT_LIMIT = 500;
 
 // Monster-chunk guard ("Los Angeles" postmortem, 26 Jul): hard per-candidate text cap
 // applied before candidates reach any LLM prompt. 12K chars keeps ~99.5% of chunks
@@ -327,7 +320,6 @@ async function replaceSources(
 
 async function researchQuestion(question: Question) {
   if (!ANTHROPIC_API_KEY) { await patchQuestion(question.id, { research_error: "Awaiting ANTHROPIC_API_KEY" }); return; }
-  setUsageContext(question.id);
   const attempt = (question.research_attempts || 0) + 1;
   await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing", research_progress: null });
   // Accumulates across the whole run — each setProgress() call below sends the WHOLE
@@ -350,14 +342,12 @@ async function researchQuestion(question: Question) {
       await setProgress(question.id, progress);
       await setStage(question.id, "retrieving");
       candidates = await lookupCitationChunks(SUPABASE_URL, adminHeaders, citationParsed.normalized_key, TOP_K_PER_COLLECTION);
-      for (const c of candidates) (c as any).index_confirmed = true;
       topicGuidance =
         `This is a direct citation lookup for ${citationParsed.book_or_tractate} ` +
         `${citationParsed.chapter_or_daf}:${citationParsed.verse_or_amud} — every candidate was retrieved because ` +
-        `it cites this exact source in a footnote, not via semantic/keyword search. A footnote citation is ` +
-        `objective evidence that this passage references the source, so classify GENUINE whenever the ` +
-        `passage cites it, including brief or passing references. Reserve TANGENTIAL/FALSE_POSITIVE for ` +
-        `passages that do not actually reference this source at all.`;
+        `it cites this exact source in a footnote, not via semantic/keyword search. Classify GENUINE only if ` +
+        `the passage actually engages with or explains this source (not just a passing citation with no ` +
+        `substantive discussion).`;
       funnelQueries = { citation_key: citationParsed.normalized_key };
 
       // SEMANTIC FALLBACK (26 Jul, "Brachos daf 2" postmortem): the citation index
@@ -383,7 +373,6 @@ async function researchQuestion(question: Question) {
         const seen = new Set(candidates.map((c) => `${c.collection}:${c.source_id}:${c.chunk_index}`));
         const extra = Object.values(byCollection).flat()
           .filter((c) => !seen.has(`${c.collection}:${c.source_id}:${c.chunk_index}`));
-        for (const c of extra) (c as any).index_confirmed = false;
         candidates = [...candidates, ...extra];
         topicGuidance +=
           ` NOTE: the citation index had very few entries for this exact reference, so additional` +
@@ -415,84 +404,60 @@ async function researchQuestion(question: Question) {
       progress.retrieved = { total: candidates.length, ...retrievedByCollection };
       await setProgress(question.id, progress);
     } else {
-      // Topical route — ANCHORED (28 Jul, "college campus" postmortem).
-      // Step 1: identify the governing noun phrase and its Hebrew surface forms.
-      const anchors = await extractAnchors(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+      // Topical route — unchanged.
+      // Step 1: turn the raw question into Hebrew queries + keyword terms + scope guidance.
+      const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+      const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter((q) => q && q.trim().length > 0);
 
+      // Progress (change 15): the generated search terms are the real output of the
+      // "Analyzing your question" stage — written the moment it's known, BEFORE
+      // retrieval starts, so the preloader can show it as soon as that stage exits.
       progress.search_terms = {
-        anchor_phrase: anchors.anchor_phrase,
-        anchor_variants: anchors.anchor_variants,
-        qualifier_terms: anchors.qualifier_terms,
-      } as any;
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
       await setProgress(question.id, progress);
 
-      // Step 2: exhaustive anchor retrieval — EVERY chunk containing any variant.
+      // Step 2: hybrid retrieval (multi-query semantic + keyword), per collection.
       await setStage(question.id, "retrieving");
-      let anchoredByCollection;
-      try {
-        anchoredByCollection = await anchoredSearch(
-          SUPABASE_URL,
-          adminHeaders,
-          anchors.anchor_variants,
-          ANCHOR_PER_VARIANT_LIMIT,
-        );
-      } catch (e) {
-        if (e instanceof AnchorSearchFailure) {
-          // Never publish an honest zero on a search failure — fail the run loudly
-          // so it surfaces as a retryable error rather than "the corpus is silent."
-          await patchQuestion(question.id, {
-            research_error: `Anchor search failed; not publishing an empty result: ${e.message}`,
-          });
-          return;
-        }
-        throw e;
-      }
-
-      // Step 3: qualifiers RANK the anchor matches; they never gate them.
-      candidates = [
-        ...rankByQualifiers(anchoredByCollection.toras_menachem, anchors.qualifier_terms, TOP_K_PER_COLLECTION),
-        ...rankByQualifiers(anchoredByCollection.igrot_kodesh, anchors.qualifier_terms, TOP_K_PER_COLLECTION),
-      ];
+      const byCollection = await hybridSearchPerCollection(
+        SUPABASE_URL,
+        adminHeaders,
+        queryTexts,
+        analysis.keyword_terms,
+        TOP_K_PER_COLLECTION,
+      );
+      candidates = Object.values(byCollection).flat();
 
       // Monster-chunk guard — cap BEFORE reflection/verification/synthesis prompts
-      // ("Los Angeles" postmortem: uncapped hits blew the 1M-token API limit).
+      // ("Los Angeles" postmortem: uncapped keyword hits blew the 1M-token API limit).
       candidates = capCandidateTexts(candidates);
 
       retrievedByCollection = {
-        toras_menachem: candidates.filter((c) => c.collection === "toras_menachem").length,
-        igrot_kodesh: candidates.filter((c) => c.collection === "igrot_kodesh").length,
+        toras_menachem: byCollection.toras_menachem?.length ?? 0,
+        igrot_kodesh: byCollection.igrot_kodesh?.length ?? 0,
       };
-      progress.retrieved = {
-        total: candidates.length,
-        anchor_matched_total:
-          anchoredByCollection.toras_menachem.length + anchoredByCollection.igrot_kodesh.length,
-        ...retrievedByCollection,
-      } as any;
+      // Progress (change 15): retrieved counts are the real output of the
+      // "Searching..." stage — written the moment retrieval finishes.
+      progress.retrieved = { total: candidates.length, ...retrievedByCollection };
       await setProgress(question.id, progress);
 
-      topicGuidance = anchors.topic_guidance;
-
-      // Step 4: reflect on the REAL anchor-matched candidates. Skipped when the
-      // corpus genuinely has nothing — reflecting on an empty pool is a wasted
-      // call that can only hallucinate guidance about passages that don't exist.
-      if (candidates.length > 0) {
-        await setStage(question.id, "reflecting");
-        const reflection = await reflectOnCandidates(
-          ANTHROPIC_API_KEY,
-          ANTHROPIC_MODEL,
-          question.question,
-          anchors.topic_guidance,
-          candidates,
-        );
-        topicGuidance = reflection.updated_guidance;
-      }
-
+      // Step 3: reflect on the REAL retrieved candidates and refine the topic guidance.
+      await setStage(question.id, "reflecting");
+      const reflection = await reflectOnCandidates(
+        ANTHROPIC_API_KEY,
+        ANTHROPIC_MODEL,
+        question.question,
+        analysis.topic_guidance,
+        candidates,
+      );
+      topicGuidance = reflection.updated_guidance;
       funnelQueries = {
-        anchor_phrase: anchors.anchor_phrase,
-        anchor_variants: anchors.anchor_variants,
-        qualifier_terms: anchors.qualifier_terms,
-        retrieval_mode: "anchored",
-      } as any;
+        hebrew_query: analysis.hebrew_query,
+        alt_queries: analysis.alt_queries ?? [],
+        keyword_terms: analysis.keyword_terms,
+      };
     }
 
     // Step 4: two-pass verification (classify, then adversarial vote on every GENUINE
@@ -510,10 +475,7 @@ async function researchQuestion(question: Question) {
 
     // All verdicts that survived pass 1 + the adversarial vote — genuinely verified,
     // real evidence. This can be an unbounded count for a broad topic.
-    const isIndexConfirmed = (v: any) => (v?.candidate as any)?.index_confirmed === true;
-    const survivingGenuineVerdicts = verified.verdicts.filter(
-      (v) => v.verdict === "GENUINE" || isIndexConfirmed(v),
-    );
+    const survivingGenuineVerdicts = verified.verdicts.filter((v) => v.verdict === "GENUINE");
 
     // Progress (change 15): verified/rejected counts are the real output of the
     // "Verifying every source" stage — written the moment verification finishes,
@@ -529,10 +491,7 @@ async function researchQuestion(question: Question) {
     // fits one Anthropic call and finishes inside the 15-minute processing window.
     // Sources beyond the cap are still genuinely verified; they're recorded in the
     // audit trail as genuine_excluded_for_space rather than silently dropped.
-    const includedGenuineVerdicts = [
-      ...survivingGenuineVerdicts.filter((v) => isIndexConfirmed(v)),
-      ...survivingGenuineVerdicts.filter((v) => !isIndexConfirmed(v)),
-    ].slice(0, MAX_SYNTHESIS_SOURCES);
+    const includedGenuineVerdicts = survivingGenuineVerdicts.slice(0, MAX_SYNTHESIS_SOURCES);
     const includedIndices = new Set(includedGenuineVerdicts.map((v) => v.index));
     const genuineCandidates = includedGenuineVerdicts.map((v) => v.candidate!).filter(Boolean);
 
@@ -556,8 +515,6 @@ async function researchQuestion(question: Question) {
         igrot_kodesh: retrievedByCollection.igrot_kodesh,
         total: candidates.length,
       },
-      index_confirmed: candidates.filter((c) => (c as any).index_confirmed === true).length,
-      semantic_fallback: candidates.filter((c) => (c as any).index_confirmed === false).length,
       pass1_verdicts: {
         genuine: survivingGenuineVerdicts.length + refutedByVote,
         tangential: verified.verdicts.filter((v) => v.verdict === "TANGENTIAL" && !v.adversarial_check).length,
