@@ -590,7 +590,7 @@ async function researchQuestion(question: Question) {
     // verdict) — same call, same guidance shape, regardless of which route produced
     // the candidates.
     await setStage(question.id, "verifying");
-    const verified = await verify(
+    let verified = await verify(
       ANTHROPIC_API_KEY,
       ANTHROPIC_MODEL,
       question.question,
@@ -602,9 +602,95 @@ async function researchQuestion(question: Question) {
     // All verdicts that survived pass 1 + the adversarial vote — genuinely verified,
     // real evidence. This can be an unbounded count for a broad topic.
     const isIndexConfirmed = (v: any) => (v?.candidate as any)?.index_confirmed === true;
-    const survivingGenuineVerdicts = verified.verdicts.filter(
+    let survivingGenuineVerdicts = verified.verdicts.filter(
       (v) => v.verdict === "GENUINE" || isIndexConfirmed(v),
     );
+
+    // SEMANTIC FALLBACK FOR THE ANCHORED ROUTE (28 Jul, "college campus" postmortem #4).
+    // Anchored retrieval proves a passage CONTAINS the anchor word - it cannot know
+    // whether the corpus uses that word as its subject or merely as a rhetorical aside.
+    // For "college campus" all 33 anchor matches were polemics about degrees ("a man who
+    // got a diploma without swaying", "parents who send children to college"), so zero
+    // survived verification while the Rebbe's actual guidance to students living away
+    // from home - written in entirely different vocabulary - was never retrieved at all.
+    // When the anchored route cites NOTHING, retry once semantically on the question's
+    // intent. Only fires on runs that would otherwise publish an empty answer, and the
+    // same adversarial panel gates every candidate, so recall grows without weakening
+    // the evidentiary standard.
+    if (!citationParsed.is_citation_lookup && survivingGenuineVerdicts.length === 0) {
+      console.log("anchored route cited 0 - semantic fallback on question intent");
+      try {
+        await setStage(question.id, "retrieving");
+        const analysis = await analyzeQuestion(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
+        const queryTexts = [analysis.hebrew_query, ...(analysis.alt_queries ?? [])].filter(
+          (q) => q && q.trim().length > 0,
+        );
+        const byCollection = await hybridSearchPerCollection(
+          SUPABASE_URL,
+          adminHeaders,
+          queryTexts,
+          analysis.keyword_terms,
+          TOP_K_PER_COLLECTION,
+        );
+        const seen = new Set(candidates.map((c) => `${c.collection}:${c.source_id}:${c.chunk_index}`));
+        let fresh = Object.values(byCollection).flat().filter(
+          (c) => !seen.has(`${c.collection}:${c.source_id}:${c.chunk_index}`),
+        );
+        fresh = capCandidateTexts(fresh);
+        console.log(`semantic fallback retrieved ${fresh.length} new candidates`);
+        if (fresh.length > 0) {
+          for (const c of fresh) (c as any).index_confirmed = false;
+          const fallbackGuidance = topicGuidance +
+            ` NOTE ON THESE CANDIDATES: literal anchor retrieval for this question returned only passages` +
+            ` that mention the anchor term in passing or as a rhetorical foil, and none survived verification.` +
+            ` The candidates below were retrieved SEMANTICALLY, by the question's underlying situation rather` +
+            ` than by its anchor word. A genuine passage here may therefore never use the anchor terminology` +
+            ` at all - judge it solely on whether it substantively addresses the underlying situation the` +
+            ` question is really asking about. The standard is otherwise UNCHANGED: GENUINE requires real,` +
+            ` substantive engagement, never mere topical adjacency.`;
+          await setStage(question.id, "verifying");
+          const fallbackVerified = await verify(
+            ANTHROPIC_API_KEY,
+            ANTHROPIC_MODEL,
+            question.question,
+            fresh,
+            fallbackGuidance,
+            N_ADVERSARIAL_VOTERS,
+          );
+          const fallbackGenuine = fallbackVerified.verdicts.filter(
+            (v) => v.verdict === "GENUINE" || isIndexConfirmed(v),
+          );
+          console.log(`semantic fallback verified ${fallbackGenuine.length} genuine of ${fresh.length} candidates`);
+          const fallbackMeta = {
+            semantic_fallback_used: true,
+            semantic_fallback_genuine: fallbackGenuine.length,
+            fallback_hebrew_query: analysis.hebrew_query,
+            fallback_alt_queries: analysis.alt_queries ?? [],
+            fallback_keyword_terms: analysis.keyword_terms,
+          };
+          // Never-worse guard, same principle as anchor widening: adopt the fallback
+          // ONLY if it actually produced verified evidence. Otherwise keep the anchored
+          // result and publish the honest empty answer.
+          if (fallbackGenuine.length > 0) {
+            candidates = fresh;
+            verified = fallbackVerified;
+            survivingGenuineVerdicts = fallbackGenuine;
+            topicGuidance = fallbackGuidance;
+            retrievedByCollection = {
+              toras_menachem: fresh.filter((c) => c.collection === "toras_menachem").length,
+              igrot_kodesh: fresh.filter((c) => c.collection === "igrot_kodesh").length,
+            };
+            funnelQueries = { ...funnelQueries, ...fallbackMeta, retrieval_mode: "anchored+semantic_fallback" };
+            progress.retrieved = { total: candidates.length, ...retrievedByCollection } as any;
+            await setProgress(question.id, progress);
+          } else {
+            funnelQueries = { ...funnelQueries, ...fallbackMeta };
+          }
+        }
+      } catch (e) {
+        console.warn(`semantic fallback failed; keeping anchored result: ${String(e)}`);
+      }
+    }
 
     // Progress (change 15): verified/rejected counts are the real output of the
     // "Verifying every source" stage — written the moment verification finishes,
