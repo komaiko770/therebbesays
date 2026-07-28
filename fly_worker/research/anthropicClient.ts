@@ -22,6 +22,83 @@ const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const REQUEST_TIMEOUT_MS = 240_000;
 const TRANSIENT_RETRY_DELAYS_MS = [5_000, 20_000];
 
+// ── Usage + cost logging (added 28 Jul) ──────────────────────────────────────
+// Every Anthropic call in the worker funnels through postAnthropic(), retries
+// included, so logging here is the only place that captures true spend. The
+// previous logging lived in the retired research-question edge function and
+// covered the abandoned web-search pipeline, so corpus research was unmeasured.
+const USAGE_SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const USAGE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+let usageQuestionId: string | null = null;
+
+/** Set once per research run so every logged call is attributable. */
+export function setUsageContext(questionId: string | null): void {
+  usageQuestionId = questionId;
+}
+
+// USD per million tokens, matched by substring against the model name.
+const PRICING_PER_MTOK: Array<[string, number, number]> = [
+  ["opus", 15, 75],
+  ["sonnet", 3, 15],
+  ["haiku", 0.8, 4],
+];
+
+function priceFor(model: string): { inRate: number; outRate: number } {
+  const m = (model || "").toLowerCase();
+  for (const [needle, inRate, outRate] of PRICING_PER_MTOK) {
+    if (m.includes(needle)) return { inRate, outRate };
+  }
+  return { inRate: 3, outRate: 15 };
+}
+
+/** Stage label inferred from the request: forced-tool calls carry the tool
+ * name (parse_citation, analyze_question, record_verdicts…); a call with no
+ * tool is the final synthesis. */
+function kindFromBody(body: any): string {
+  const toolName = body?.tools?.[0]?.name;
+  return toolName ? String(toolName) : "synthesis";
+}
+
+async function logUsage(body: any, payload: any): Promise<void> {
+  try {
+    if (!USAGE_SUPABASE_URL || !USAGE_SERVICE_KEY) return;
+    const u = payload?.usage || {};
+    const inTok = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) +
+      (u.cache_read_input_tokens || 0);
+    const outTok = u.output_tokens || 0;
+    const model = String(body?.model || "");
+    const { inRate, outRate } = priceFor(model);
+    const cost = (inTok / 1_000_000) * inRate + (outTok / 1_000_000) * outRate;
+    const res = await fetch(`${USAGE_SUPABASE_URL}/rest/v1/usage_events`, {
+      method: "POST",
+      headers: {
+        apikey: USAGE_SERVICE_KEY,
+        Authorization: `Bearer ${USAGE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        question_id: usageQuestionId,
+        kind: kindFromBody(body),
+        provider: "anthropic",
+        model,
+        input_tokens: inTok,
+        output_tokens: outTok,
+        web_search_count: 0,
+        cost_usd: Number(cost.toFixed(6)),
+      }),
+    });
+    if (!res.ok) {
+      console.error(`logUsage: insert failed ${res.status}: ${await res.text()}`);
+    }
+  } catch (err) {
+    // Never let logging break a research run, but never fail silently either.
+    console.error(`logUsage: ${err}`);
+  }
+}
+
+
 export type ToolSchema = {
   name: string;
   description: string;
@@ -57,6 +134,7 @@ async function postAnthropic(apiKey: string, body: Record<string, unknown>): Pro
         }
         throw new Error(`Anthropic API error ${res.status}: ${payload?.error?.message || "request failed"}`);
       }
+      await logUsage(body, payload);
       return payload;
     } catch (err) {
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError" || err.message.includes("error trying to connect") || err.message.includes("connection"))) {

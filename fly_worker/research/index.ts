@@ -131,6 +131,7 @@ type SourceRow = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+import { setUsageContext } from "./anthropicClient.ts";
 const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -320,6 +321,7 @@ async function replaceSources(
 
 async function researchQuestion(question: Question) {
   if (!ANTHROPIC_API_KEY) { await patchQuestion(question.id, { research_error: "Awaiting ANTHROPIC_API_KEY" }); return; }
+  setUsageContext(question.id);
   const attempt = (question.research_attempts || 0) + 1;
   await patchQuestion(question.id, { status: "researching", research_attempts: attempt, research_started_at: new Date().toISOString(), research_model: ANTHROPIC_MODEL, research_error: null, research_stage: "analyzing", research_progress: null });
   // Accumulates across the whole run — each setProgress() call below sends the WHOLE
