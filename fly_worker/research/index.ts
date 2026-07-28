@@ -132,7 +132,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 import { setUsageContext } from "./anthropicClient.ts";
-import { extractAnchors } from "./analyzeQuestion.ts";
+import { extractAnchors, widenAnchors } from "./analyzeQuestion.ts";
 import { anchoredSearch, rankByQualifiers, AnchorSearchFailure } from "./retrieve.ts";
 const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 const RESEARCH_PORT = Number(Deno.env.get("RESEARCH_PORT") ?? "8081");
@@ -419,10 +419,67 @@ async function researchQuestion(question: Question) {
       // Step 1: identify the governing noun phrase and its Hebrew surface forms.
       const anchors = await extractAnchors(ANTHROPIC_API_KEY, ANTHROPIC_MODEL, question.question);
 
+      // Step 1b: CORPUS FREQUENCY GATE (28 Jul, postmortem #2). Never let an
+      // unmeasured variant set define the answer's ceiling. Ask the database what
+      // each proposed stem actually matches; if recall is thin or any stem is dead,
+      // show the model the real numbers and let it widen once.
+      const ANCHOR_THIN_RECALL_FLOOR = 12;
+      const countVariants = async (terms: string[]): Promise<Record<string, number>> => {
+        if (!terms.length) return {};
+        try {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/count_corpus_chunks_terms`, {
+            method: "POST",
+            headers: { ...adminHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({ terms }),
+          });
+          if (!res.ok) {
+            console.warn(`variant frequency check failed (${res.status}); proceeding unwidened`);
+            return {};
+          }
+          const rows = (await res.json()) as Array<{ term: string; matches: number }>;
+          return Object.fromEntries(rows.map((r) => [r.term, Number(r.matches) || 0]));
+        } catch (e) {
+          console.warn(`variant frequency check errored; proceeding unwidened: ${String(e)}`);
+          return {};
+        }
+      };
+
+      let variantCounts = await countVariants(anchors.anchor_variants);
+      let widenedFrom: string[] | null = null;
+      const sumCounts = (m: Record<string, number>) => Object.values(m).reduce((x, y) => x + y, 0);
+      const deadCount = Object.values(variantCounts).filter((n) => n === 0).length;
+
+      if (Object.keys(variantCounts).length > 0 && (sumCounts(variantCounts) < ANCHOR_THIN_RECALL_FLOOR || deadCount > 0)) {
+        console.log(`anchor recall thin (${sumCounts(variantCounts)} matches, ${deadCount} dead variants) - widening once`);
+        try {
+          const widened = await widenAnchors(
+            ANTHROPIC_API_KEY,
+            ANTHROPIC_MODEL,
+            question.question,
+            anchors.anchor_phrase,
+            variantCounts,
+          );
+          const merged = Array.from(new Set([...anchors.anchor_variants, ...widened.anchor_variants]));
+          if (merged.length > anchors.anchor_variants.length) {
+            widenedFrom = anchors.anchor_variants;
+            anchors.anchor_variants = merged;
+            if (widened.qualifier_terms.length) {
+              anchors.qualifier_terms = Array.from(new Set([...anchors.qualifier_terms, ...widened.qualifier_terms]));
+            }
+            variantCounts = await countVariants(anchors.anchor_variants);
+            console.log(`widened to ${merged.length} variants, ${sumCounts(variantCounts)} total matches`);
+          }
+        } catch (e) {
+          console.warn(`anchor widening failed; proceeding with original variants: ${String(e)}`);
+        }
+      }
+
       progress.search_terms = {
         anchor_phrase: anchors.anchor_phrase,
         anchor_variants: anchors.anchor_variants,
         qualifier_terms: anchors.qualifier_terms,
+        variant_counts: variantCounts,
+        widened_from: widenedFrom,
       } as any;
       await setProgress(question.id, progress);
 
@@ -491,6 +548,8 @@ async function researchQuestion(question: Question) {
         anchor_phrase: anchors.anchor_phrase,
         anchor_variants: anchors.anchor_variants,
         qualifier_terms: anchors.qualifier_terms,
+        variant_counts: variantCounts,
+        widened_from: widenedFrom,
         retrieval_mode: "anchored",
       } as any;
     }

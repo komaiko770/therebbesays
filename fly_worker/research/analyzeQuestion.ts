@@ -130,7 +130,7 @@ const ANCHOR_TOOL = {
       anchor_variants: {
         type: "string",
         description:
-          "4-10 Hebrew surface forms of the anchor phrase, joined with a pipe character. CRITICAL: these are matched as LITERAL SUBSTRINGS against the corpus text — there is no stemming, lemmatization, or fuzzy matching. Therefore: (a) do NOT bother with prefixed forms, since a prefix prepends and the base form is still a substring (ב+אוניברסיטה = באוניברסיטה already contains אוניברסיטה); (b) you MUST include PLURAL and other suffixed forms explicitly, because a suffix mutates the ending and breaks the substring (אוניברסיטה is NOT a substring of אוניברסיטאות); (c) include genuine SYNONYMS and period-appropriate vocabulary the Rebbe's era would actually use, not just the modern loanword — for a named modern technology, include the era's predecessor terminology; (d) each variant must be at least 3 characters; (e) prefer distinctive words — a variant that is also a common unrelated word will flood the results with noise.",
+          "4-10 Hebrew search STEMS for the anchor phrase, joined with a pipe character. CRITICAL: these are matched as LITERAL SUBSTRINGS (SQL ILIKE) against the corpus text - no stemming, no lemmatization, no fuzzy matching. A SHORTER string therefore matches strictly MORE passages. Rules: (a) give the shortest distinctive STEM, not the dictionary form - truncate the inflectional ending so one entry covers every prefix, suffix, construct and plural at once; the bare stem for university also matches its definite, prepositional, construct and plural forms, whereas the full definite form matches only itself. (b) NEVER include a form that merely adds a prefix or suffix to another entry in your list - it is dead weight matching a strict subset. (c) The corpus is 1950-1973, and Toras Menachem is spoken YIDDISH transcribed in Hebrew letters - include Yiddish transcription spellings alongside modern Israeli Hebrew, or you will retrieve from the letters only and miss the talks entirely. (d) Include the era own vocabulary and predecessor terminology, not just the modern loanword. (e) Minimum 3 characters, prefer 4+ so the stem stays distinctive - a stem that is also a common unrelated word floods results with noise. (f) If the anchor is a modern English compound, do NOT assume it exists in the corpus at all: supply stems for the underlying concept AND for the people involved in it (for a college campus, the university stem and the student stem), because the corpus may never use the compound itself.",
       },
       qualifier_terms: {
         type: "string",
@@ -160,7 +160,7 @@ Instead it works in two stages, and your job is stage one:
 
 So choose the anchor as the thing whose ABSENCE would make a passage irrelevant no matter what else it says. For "how to prepare for a new school year on a college campus," a passage that never touches university/college life is useless however much it discusses preparation — so the anchor is the campus, and preparation is a qualifier.
 
-Remember the matching is literal substring matching over Hebrew text: include plural and suffixed forms explicitly, and include the words a source from 1950-1973 would actually have used.
+Remember the matching is literal substring matching over Hebrew text. Give the SHORTEST DISTINCTIVE STEM for each variant rather than the full dictionary word, because a stem also matches every prefixed, suffixed, construct and plural form built on it, while a full form matches only itself. Include Yiddish transcription spellings - the talks are transcribed spoken Yiddish in Hebrew letters - and the words a source from 1950-1973 would actually have used. If the question phrasing is modern, anchor on the underlying concept the corpus would actually name.
 
 Call report_anchors.`;
 }
@@ -192,6 +192,71 @@ export async function extractAnchors(
     anchor_variants: splitPipes(result.anchor_variants).filter((v) => v.length >= 3),
     qualifier_terms: splitPipes(result.qualifier_terms),
     topic_guidance: String(result.topic_guidance ?? ""),
+  };
+}
+
+// -- CORPUS-GROUNDED WIDENING (28 Jul, "college campus" postmortem #2) --------
+// The first anchored run on the campus question retrieved 10 chunks, only 2 from
+// Toras Menachem. Cause: the model supplied full dictionary forms instead of the
+// bare stem, plus three variants from the campus family that appear ZERO times in
+// the entire corpus. Under literal substring matching a zero-hit variant silently
+// caps the whole answer, and the model cannot know corpus frequencies by
+// introspection. The database can. This shows the model the real match counts for
+// its own variants and lets it revise ONCE, grounded in fact rather than guessing
+// a second time.
+const WIDEN_TOOL = {
+  name: "report_widened_anchors",
+  description: "Report additional Hebrew anchor stems after seeing real corpus match counts.",
+  input_schema: {
+    type: "object",
+    properties: {
+      anchor_variants: {
+        type: "string",
+        description:
+          "Additional Hebrew STEMS to add, joined with a pipe character. Do not repeat variants that already scored above zero. Replace every zero-scoring variant with a shorter stem of the same word, a Yiddish transcription spelling, or a different word the corpus would actually use. Shorter is better: matching is literal substring.",
+      },
+      qualifier_terms: {
+        type: "string",
+        description: "Optional additional Hebrew ranking terms, joined with a pipe character. May be empty.",
+      },
+    },
+    required: ["anchor_variants"],
+  },
+};
+
+function buildWidenPrompt(question: string, anchorPhrase: string, counts: Record<string, number>): string {
+  const lines = Object.entries(counts)
+    .sort((x, y) => y[1] - x[1])
+    .map(([t, n]) => `  ${t} -> ${n} passage${n === 1 ? "" : "s"}${n === 0 ? "   <-- MATCHES NOTHING" : ""}`)
+    .join("\n");
+  const total = Object.values(counts).reduce((x, y) => x + y, 0);
+  return `You proposed Hebrew anchor variants for a research question, and we measured them against the actual corpus (the Rebbe's talks 1950-1973 and letters). Here is how many passages each one literally matches:
+
+Question: "${question}"
+Anchor concept: "${anchorPhrase}"
+
+${lines}
+
+Total: ${total} passage matches across all variants.
+
+This recall is too thin, or some variants match nothing at all. Matching is literal substring matching, so a variant scoring 0 is NOT evidence the corpus is silent on the topic. It almost always means the wording is wrong: too long (a full inflected form where a stem was needed), too modern (a loanword the corpus never used), or the wrong register (Israeli Hebrew where the talks use transcribed Yiddish).
+
+Propose ADDITIONAL variants that will actually hit. Prefer short stems. Consider what a Yiddish-speaking Torah scholar in 1950-1973 would have called this, and consider the PEOPLE involved in it, not only the place or object.
+
+Call report_widened_anchors.`;
+}
+
+export async function widenAnchors(
+  apiKey: string,
+  model: string,
+  question: string,
+  anchorPhrase: string,
+  counts: Record<string, number>,
+): Promise<{ anchor_variants: string[]; qualifier_terms: string[] }> {
+  const result = await callClaudeTool(apiKey, model, buildWidenPrompt(question, anchorPhrase, counts), WIDEN_TOOL, 1024);
+  return {
+    anchor_variants: splitPipes(result.anchor_variants).filter((v) => v.length >= 3),
+    qualifier_terms: splitPipes(result.qualifier_terms),
   };
 }
 
