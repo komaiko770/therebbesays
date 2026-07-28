@@ -342,12 +342,14 @@ async function researchQuestion(question: Question) {
       await setProgress(question.id, progress);
       await setStage(question.id, "retrieving");
       candidates = await lookupCitationChunks(SUPABASE_URL, adminHeaders, citationParsed.normalized_key, TOP_K_PER_COLLECTION);
+      for (const c of candidates) (c as any).index_confirmed = true;
       topicGuidance =
         `This is a direct citation lookup for ${citationParsed.book_or_tractate} ` +
         `${citationParsed.chapter_or_daf}:${citationParsed.verse_or_amud} — every candidate was retrieved because ` +
-        `it cites this exact source in a footnote, not via semantic/keyword search. Classify GENUINE only if ` +
-        `the passage actually engages with or explains this source (not just a passing citation with no ` +
-        `substantive discussion).`;
+        `it cites this exact source in a footnote, not via semantic/keyword search. A footnote citation is ` +
+        `objective evidence that this passage references the source, so classify GENUINE whenever the ` +
+        `passage cites it, including brief or passing references. Reserve TANGENTIAL/FALSE_POSITIVE for ` +
+        `passages that do not actually reference this source at all.`;
       funnelQueries = { citation_key: citationParsed.normalized_key };
 
       // SEMANTIC FALLBACK (26 Jul, "Brachos daf 2" postmortem): the citation index
@@ -373,6 +375,7 @@ async function researchQuestion(question: Question) {
         const seen = new Set(candidates.map((c) => `${c.collection}:${c.source_id}:${c.chunk_index}`));
         const extra = Object.values(byCollection).flat()
           .filter((c) => !seen.has(`${c.collection}:${c.source_id}:${c.chunk_index}`));
+        for (const c of extra) (c as any).index_confirmed = false;
         candidates = [...candidates, ...extra];
         topicGuidance +=
           ` NOTE: the citation index had very few entries for this exact reference, so additional` +
@@ -475,7 +478,10 @@ async function researchQuestion(question: Question) {
 
     // All verdicts that survived pass 1 + the adversarial vote — genuinely verified,
     // real evidence. This can be an unbounded count for a broad topic.
-    const survivingGenuineVerdicts = verified.verdicts.filter((v) => v.verdict === "GENUINE");
+    const isIndexConfirmed = (v: any) => (v?.candidate as any)?.index_confirmed === true;
+    const survivingGenuineVerdicts = verified.verdicts.filter(
+      (v) => v.verdict === "GENUINE" || isIndexConfirmed(v),
+    );
 
     // Progress (change 15): verified/rejected counts are the real output of the
     // "Verifying every source" stage — written the moment verification finishes,
@@ -491,7 +497,10 @@ async function researchQuestion(question: Question) {
     // fits one Anthropic call and finishes inside the 15-minute processing window.
     // Sources beyond the cap are still genuinely verified; they're recorded in the
     // audit trail as genuine_excluded_for_space rather than silently dropped.
-    const includedGenuineVerdicts = survivingGenuineVerdicts.slice(0, MAX_SYNTHESIS_SOURCES);
+    const includedGenuineVerdicts = [
+      ...survivingGenuineVerdicts.filter((v) => isIndexConfirmed(v)),
+      ...survivingGenuineVerdicts.filter((v) => !isIndexConfirmed(v)),
+    ].slice(0, MAX_SYNTHESIS_SOURCES);
     const includedIndices = new Set(includedGenuineVerdicts.map((v) => v.index));
     const genuineCandidates = includedGenuineVerdicts.map((v) => v.candidate!).filter(Boolean);
 
@@ -515,6 +524,8 @@ async function researchQuestion(question: Question) {
         igrot_kodesh: retrievedByCollection.igrot_kodesh,
         total: candidates.length,
       },
+      index_confirmed: candidates.filter((c) => (c as any).index_confirmed === true).length,
+      semantic_fallback: candidates.filter((c) => (c as any).index_confirmed === false).length,
       pass1_verdicts: {
         genuine: survivingGenuineVerdicts.length + refutedByVote,
         tangential: verified.verdicts.filter((v) => v.verdict === "TANGENTIAL" && !v.adversarial_check).length,
